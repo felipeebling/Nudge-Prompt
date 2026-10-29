@@ -1,0 +1,13 @@
+{
+  "name": "ajuste-visual",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Abre qualquer página no Chrome com um editor para arrastar, redimensionar e girar elementos e copiar as alterações em texto.",
+  "type": "module",
+  "scripts": {
+    "start": "node abrir.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}

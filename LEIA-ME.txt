@@ -1,0 +1,53 @@
+AJUSTE VISUAL
+Abre qualquer página num Chrome à parte com um editor para mover, redimensionar,
+girar e mudar a opacidade de elementos, e gera um texto com as alterações para
+colar no Claude ou no Codex aplicar no código.
+
+ABRIR
+  Dois cliques em "Ajuste Visual.cmd". Ele pergunta o endereço (Enter = http://localhost:4321).
+  Também dá para abrir direto:  "Ajuste Visual.cmd" localhost:4321/turismo
+  Na primeira vez ele instala o necessário sozinho (precisa do Node instalado).
+
+USAR (na janela que abrir)
+  Botão "✎ Ajuste visual" (canto inferior esquerdo) ... liga/desliga o editor
+  Ctrl+Shift+E ......... atalho para o mesmo botão
+  Clique + arrastar .... escolhe e move o elemento. Clicar dentro do elemento já
+                         escolhido arrasta ele mesmo, mesmo que esteja atrás de outro.
+                         Seções e blocos que ocupam mais de meia tela não são pegos
+                         no clique: escolha-os pela lista do painel, se precisar.
+  Alt+clique ........... pega o que está escondido atrás (decoração de fundo);
+                         repita no mesmo lugar para ir mais fundo
+  Alças laranja ........ mudam o tamanho: as do meio de cada lado mudam só a
+                         largura ou só a altura; as dos cantos mudam as duas
+                         (em imagens mantêm a proporção; com Shift, livre).
+                         O lado oposto ao que você puxa fica parado.
+  Ctrl+rodinha ......... tamanho
+  Shift+rodinha ........ girar
+  Alt+rodinha .......... opacidade
+  Setas ................ move 1px (Shift: 10px)
+  [ e ] ................ elemento de trás / da frente no mesmo ponto
+  + Imagem ............. abre a janela de arquivos do Windows; a imagem escolhida entra
+                         na mesma camada do elemento selecionado (escolha antes uma
+                         gravura, com Alt+clique, para ela ir junto das gravuras), no
+                         meio da tela, e já pode ser arrastada, redimensionada e girada.
+                         No texto sai como "ADICIONAR imagem nova", com o caminho do
+                         arquivo, onde colocar, posição e tamanho finais.
+  H .................... espelha o elemento na horizontal (botão "Espelhar")
+  Delete ............... remove o elemento escolhido (botão "Remover" faz o mesmo);
+                         no texto ele sai como "remover: tirar este elemento da página"
+  Ctrl+Z ............... desfaz (inclusive remoção; "Restaurar este" também traz de volta)
+  Esc .................. solta o elemento
+  Painel ............... arraste pelo título para mudar de lugar; "?" mostra os
+                         atalhos e "–" recolhe. Lista "Elementos neste ponto"
+                         (clique para escolher; nome completo ao passar o mouse)
+                         e "Alterados"; botão "Parar animações" ajuda a
+                         posicionar peças que se mexem
+
+COPIAR
+  "Copiar alterações" copia o texto para a área de transferência e salva em
+  alteracoes.txt nesta pasta. Cole no chat do agente.
+
+OBSERVAÇÕES
+  - As mudanças são só na tela: recarregar a página apaga tudo.
+  - Os valores valem para a largura de tela em que você ajustou (aparece no texto).
+  - Esta janela usa um perfil próprio (pasta "perfil"), separado do seu Chrome.
