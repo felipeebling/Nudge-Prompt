@@ -39,6 +39,13 @@ const contexto = await chromium.launchPersistentContext(perfil, {
 });
 await prepararContexto(contexto, pasta);
 
+// Erros do editor aparecem também nesta janela preta, para dar para mandar ao agente.
+const mostrarErros = (p) => p.on('console', (m) => {
+  if (m.type() === 'error' && m.text().includes('[Ajuste visual]')) console.error(m.text());
+});
+contexto.pages().forEach(mostrarErros);
+contexto.on('page', mostrarErros);
+
 const pagina = contexto.pages()[0] ?? await contexto.newPage();
 await pagina.goto(endereco).catch((erro) => console.error('Não consegui abrir:', erro.message));
 console.log(`Aberto em ${executavel.split('/').pop()}. Na página, aperte Ctrl+Shift+E para ligar o editor.`);

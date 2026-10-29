@@ -1443,8 +1443,17 @@
     }
   }
   async function copiar(comPrints = false) {
-    const prints = comPrints ? await tirarPrints() : [];
-    const texto = relatorio(prints);
+    avisar(comPrints ? 'Tirando os prints e copiando…' : 'Copiando…');
+    let texto;
+    // Um erro ao montar o texto não pode passar calado: aparece no painel e no console.
+    try {
+      const prints = comPrints ? await tirarPrints() : [];
+      texto = relatorio(prints);
+    } catch (erro) {
+      console.error(`[Ajuste visual] erro ao montar o texto: ${erro.stack || erro.message}`);
+      avisar(`Erro ao montar o texto: ${erro.message}${erro.stack ? ` (${erro.stack.split('\n')[1]?.trim()})` : ''}`);
+      return;
+    }
     try {
       if (window.__ajusteSalvar) {
         const arquivo = await window.__ajusteSalvar(texto);
