@@ -114,6 +114,38 @@ await botao('limpar').click();
 await recarregar();
 conferir('"Limpar tudo" também apaga o que estava guardado', !(await aviso()), await aviso());
 
+/* ---------- 4. larguras de tela ---------- */
+const telaBotao = (w) => pagina.locator(`[data-ajuste-visual] button[data-tela="${w}"]`);
+await ligar();
+await arrastar(await centro('.arte-a'), 50, 20);
+const naLargura = await caixa('.arte-a');
+await telaBotao(390).click();
+await pagina.waitForTimeout(900);
+conferir('botão Celular muda a largura para 390px', await pagina.evaluate(() => innerWidth) === 390);
+conferir('avisa a troca de largura', (await aviso()).includes('Tela 1280px → 390px'), await aviso());
+conferir('na outra largura, o ajuste de 1280px sai da tela', (await pagina.evaluate(() => document.querySelector('.arte-a').style.translate)) === '');
+await arrastar(await centro('.card h2'), 0, 30);
+texto = await relatorio();
+conferir('o texto separa os ajustes por largura', texto.includes('=== Tela de 1280px de largura ===') && texto.includes('=== Tela de 390px de largura (a atual) ==='), texto);
+// Volta a 1280px (o botão "Janela", aqui no teste, cairia no tamanho da janela invisível do Chrome).
+await pagina.evaluate(() => window.__ajusteTela(1280));
+await pagina.waitForTimeout(900);
+conferir('voltando, os ajustes daquela largura voltam', igual(naLargura, await caixa('.arte-a')), JSON.stringify([naLargura, await caixa('.arte-a')]));
+
+/* ---------- 5. prints ---------- */
+await botao('copiar-prints').click();
+await pagina.waitForFunction(() => document.querySelector('[data-ajuste-visual]').shadowRoot.querySelector('.aviso').textContent.startsWith('Copiado'), null, { timeout: 30000 });
+texto = readFileSync(join(saida, 'alteracoes.txt'), 'utf8');
+const prints = existsSync(join(saida, 'prints')) ? readdirSync(join(saida, 'prints')) : [];
+conferir('salva os prints de antes e depois', prints.some((p) => p.endsWith('-antes.jpg')) && prints.some((p) => p.endsWith('-depois.jpg')), prints.join(', '));
+conferir('o texto aponta os prints', texto.includes('Prints da página inteira: antes '), texto);
+conferir('a interface volta depois dos prints', await pagina.locator('[data-ajuste-visual] .pilula').isVisible());
+console.log(`     prints em ${join(saida, 'prints')}`);
+
+await telaBotao(0).click();
+await pagina.waitForTimeout(900);
+conferir('botão Janela tira a largura emulada', await pagina.evaluate(() => innerWidth) !== 1280);
+
 console.log(`\n${total - falhas.length}/${total} conferências passaram.`);
 if (falhas.length) console.log(`\nFalhas:\n- ${falhas.join('\n- ')}`);
 await navegador.close();

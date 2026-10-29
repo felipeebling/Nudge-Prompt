@@ -1,5 +1,5 @@
 // Funções do Node que o editor chama pela página (copiar, escolher imagem...), e a injeção do editor.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 
@@ -57,6 +57,24 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
   await contexto.exposeBinding('__ajusteLerImagem', async (_origem, caminho) => {
     if (!(lerConfig().imagensEscolhidas ?? []).includes(caminho) || !existsSync(caminho)) return null;
     return comoDataUrl(caminho);
+  });
+
+  // Botões de largura de tela: emula a largura pedida (null volta ao tamanho da janela).
+  const sessoes = new WeakMap();
+  await contexto.exposeBinding('__ajusteTela', async ({ page }, largura) => {
+    if (!sessoes.has(page)) sessoes.set(page, await contexto.newCDPSession(page));
+    const cdp = sessoes.get(page);
+    if (!largura) await cdp.send('Emulation.clearDeviceMetricsOverride');
+    else await cdp.send('Emulation.setDeviceMetricsOverride', { width: largura, height: 0, deviceScaleFactor: 0, mobile: largura < 768 });
+  });
+
+  // Prints de antes e depois, na pasta prints/. O nome vem da página: só aceita o formato que o editor gera.
+  await contexto.exposeBinding('__ajusteFoto', async ({ page }, nome) => {
+    if (!/^[\w-]+\.jpg$/.test(nome)) return null;
+    const destino = join(saida, 'prints', nome);
+    mkdirSync(dirname(destino), { recursive: true });
+    await page.screenshot({ path: destino, fullPage: true, type: 'jpeg', quality: 75, animations: 'disabled' });
+    return destino;
   });
 
   await contexto.addInitScript({ content: readFileSync(join(pasta, 'editor.js'), 'utf8') });

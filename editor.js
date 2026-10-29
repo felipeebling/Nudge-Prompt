@@ -297,6 +297,11 @@
         .botoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
         .aviso { color: #8fe3a5; margin-top: 6px; min-height: 1em; word-break: break-all; }
         h4 { margin: 8px 0 2px; font-weight: 600; color: #c9c9cf; }
+        .telas { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 2px 0 4px; color: #a0a0a5; }
+        .telas b { color: #f2f2f2; font-weight: 600; margin-right: 2px; }
+        .telas button { padding: 2px 7px; }
+        .telas button.on { background: #ff5a1f; }
+        .telas button.tem::after { content: ' •'; color: #ffb08a; }
         .ui { display: none; }
         :host(.on) .ui { display: block; }
         .pilula { position: fixed; left: 12px; bottom: 12px; pointer-events: auto; padding: 8px 14px; border-radius: 999px;
@@ -311,6 +316,8 @@
         <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
           <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Ctrl+Z: desfazer · Delete: remover · H: espelhar · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Esc: soltar · Ctrl+Shift+E: desligar.</div>
+          <div class="telas" title="Mudar a largura da tela. Cada largura guarda os seus próprios ajustes (ponto: tem ajustes guardados).">Tela <b class="agora"></b>
+            ${tamanhosDeTela.map(([nome, w]) => `<button data-tela="${w}" title="${w}px">${nome}</button>`).join('')}<button data-tela="0" title="Volta ao tamanho da janela">Janela</button></div>
           <div class="info sel-info">Nenhum elemento escolhido.</div>
           <h4>Elementos neste ponto</h4>
           <ul class="lista candidatos"></ul>
@@ -318,6 +325,7 @@
           <ul class="lista alterados"></ul>
           <div class="botoes">
             <button class="forte" data-acao="copiar">Copiar alterações</button>
+            <button class="com-node" data-acao="copiar-prints" title="Também salva prints da página inteira, antes e depois, na pasta prints">Copiar com prints</button>
             <button data-acao="desfazer">Desfazer</button>
             <button data-acao="imagem" title="Escolher uma imagem de uma pasta e colocar na página">+ Imagem</button>
             <button data-acao="espelhar" title="H">Espelhar</button>
@@ -341,6 +349,7 @@
       if (acao === 'min') { painel.classList.toggle('min'); guardarPainel(); }
       if (acao === 'ajuda') { painel.classList.toggle('ajuda'); guardarPainel(); }
       if (acao === 'copiar') copiar();
+      if (acao === 'copiar-prints') copiar(true);
       if (acao === 'desfazer') voltar();
       if (acao === 'restaurar' && selecionado) { restaurar(selecionado); atualizarPainel(); }
       if (acao === 'remover') remover(selecionado);
@@ -348,6 +357,8 @@
       if (acao === 'imagem') adicionarImagem();
       if (acao === 'limpar') { [...alteracoes.keys()].forEach(restaurar); parados = []; desfazer.length = 0; atualizarPainel(); guardar(); }
       if (acao === 'anim') alternarAnimacoes(e.target);
+      const tela = e.target.closest?.('button[data-tela]');
+      if (tela) mudarTela(Number(tela.dataset.tela) || null);
       const item = e.target.closest?.('li[data-i]');
       if (item) {
         const lista = item.parentElement.classList.contains('alterados') ? [...alteracoes.keys()] : candidatos;
@@ -382,6 +393,7 @@
     } catch { /* sem armazenamento: painel no lugar padrão */ }
     if (avisoPendente) avisar(avisoPendente);
     atualizarPilula();
+    atualizarTelas();
   }
 
   function guardarPainel() {
@@ -455,6 +467,7 @@
     const alterados = [...alteracoes.keys()];
     raiz.querySelector('.alterados').innerHTML = lista(alterados);
     raiz.querySelector('.total').textContent = String([...alteracoes.values()].filter(mudou).length);
+    atualizarTelas();
   }
   // Antes de a interface existir, o aviso espera e aparece quando ela for criada.
   let avisoPendente = '';
@@ -614,9 +627,6 @@
     if (!host) criarUi();
     else if (!host.isConnected) document.documentElement.appendChild(host);
   };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', garantirUi);
-  else garantirUi();
-  setInterval(garantirUi, 1000);
 
   /* ---------- guardar e reaplicar ao recarregar ----------
      Cada alteração vira um registro guardado no navegador, por página. Ao recarregar (por exemplo,
@@ -751,6 +761,8 @@
     return partes.join(' · ');
   }
   async function reaplicarGuardado() {
+    // No começo da página a largura ainda pode não ser a final; vale a de agora.
+    telaAtual = innerWidth;
     guardado = lerGuardado();
     const registros = guardado.telas[telaAtual] ?? [];
     if (!registros.length) { carregado = true; atualizarPilula(); return; }
@@ -759,6 +771,46 @@
     console.info(`[Ajuste visual] Depois de recarregar: ${resumo}`);
     avisar(`Depois de recarregar: ${resumo}`);
   }
+  /* Cada largura de tela tem os seus ajustes: ao mudar a largura (botões do painel ou a janela),
+     os da largura anterior saem da tela e ficam guardados, e entram os da nova. */
+  async function trocarTela() {
+    if (!carregado || reaplicando || arrasto || innerWidth === telaAtual) return;
+    const antiga = telaAtual;
+    guardar();
+    reaplicando = true;
+    selecionar(null);
+    candidatos = [];
+    [...alteracoes.keys()].forEach(restaurar);
+    desfazer.length = 0;
+    reaplicando = false;
+    telaAtual = innerWidth;
+    const conta = await reaplicar(guardado?.telas[telaAtual] ?? []);
+    const resumo = resumoConferencia(conta);
+    avisar(`Tela ${antiga}px → ${telaAtual}px. Os ajustes de ${antiga}px ficaram guardados.${resumo ? ` Desta largura: ${resumo}` : ''}`);
+    atualizarTelas();
+  }
+  let esperaTela = 0;
+  addEventListener('resize', () => { clearTimeout(esperaTela); esperaTela = setTimeout(trocarTela, 300); });
+  // Botões de largura só existem quando a ferramenta abre a página (precisa do Node para mudar a janela).
+  const tamanhosDeTela = [['Celular', 390], ['Tablet', 768], ['Notebook', 1366]];
+  async function mudarTela(largura) {
+    if (!window.__ajusteTela) return;
+    await window.__ajusteTela(largura);
+  }
+  function atualizarTelas() {
+    if (!raiz) return;
+    const linha = raiz.querySelector('.telas');
+    linha.style.display = window.__ajusteTela ? '' : 'none';
+    raiz.querySelectorAll('.com-node').forEach((b) => { b.style.display = window.__ajusteFoto ? '' : 'none'; });
+    const salvas = Object.keys(guardado?.telas ?? {}).map(Number);
+    linha.querySelector('.agora').textContent = `${innerWidth}px`;
+    linha.querySelectorAll('button[data-tela]').forEach((b) => {
+      const w = Number(b.dataset.tela);
+      b.classList.toggle('on', w ? innerWidth === w : !tamanhosDeTela.some(([, l]) => l === innerWidth));
+      b.classList.toggle('tem', w > 0 && salvas.includes(w) && w !== innerWidth);
+    });
+  }
+
   // Espera a página assentar (fontes, imagens) antes de medir e comparar.
   const quandoCarregar = () => setTimeout(reaplicarGuardado, 400);
   if (document.readyState === 'complete') quandoCarregar();
@@ -796,9 +848,11 @@
     }
     return linhas;
   }
-  function relatorio() {
+  function relatorio(prints = []) {
     guardar();
-    const itens = [...registrosAtuais(), ...parados];
+    // Todas as larguras de tela com ajustes; a atual vem do que está na tela agora.
+    const telas = { ...(guardado?.telas ?? {}), [telaAtual]: [...registrosAtuais(), ...parados] };
+    const larguras = Object.keys(telas).map(Number).filter((w) => telas[w].length).sort((a, b) => b - a);
     const avisoParado = {
       diferente: '   atenção: depois de recarregar, este elemento não estava nem como antes nem como depois do ajuste; confira se ainda vale',
       sumiu: '   atenção: depois de recarregar, não achei este elemento na página; confira se ainda vale',
@@ -807,10 +861,13 @@
       'Ajuste visual — alterações feitas na tela',
       `Página: ${location.href}`,
       `Tela: ${innerWidth}×${innerHeight}px · ${new Date().toLocaleString('pt-BR')}`,
-      'Aplique no código-fonte que gera estes elementos. Os valores são relativos à posição original, nesta largura de tela.',
+      larguras.length > 1
+        ? `Há ajustes em ${larguras.length} larguras de tela (${larguras.map((w) => `${w}px`).join(', ')}). Aplique cada grupo só na sua faixa de largura (media query); os valores são relativos à posição original naquela largura.`
+        : 'Aplique no código-fonte que gera estes elementos. Os valores são relativos à posição original, nesta largura de tela.',
+      ...prints,
       '',
     ];
-    itens.forEach(({ orig: o, valores: s, novo, codigo, parado }, i) => {
+    const escreverItem = ({ orig: o, valores: s, novo, codigo, parado }, i) => {
       const atencao = parado ? [avisoParado[parado]] : [];
       if (novo) {
         // Imagem nova: valores finais (não deltas), sem rotação no left/top.
@@ -856,12 +913,65 @@
         ...partes,
         '',
       );
-    });
-    if (!itens.length) linhas.push('(nenhuma alteração)');
+    };
+    let i = 0;
+    for (const w of larguras) {
+      if (larguras.length > 1) linhas.push(`=== Tela de ${w}px de largura${w === telaAtual ? ' (a atual)' : ''} ===`, '');
+      for (const r of telas[w]) escreverItem(r, i++);
+    }
+    if (!i) linhas.push('(nenhuma alteração)');
     return linhas.join('\n');
   }
-  async function copiar() {
-    const texto = relatorio();
+  /* Prints da página inteira: "antes" sem os ajustes e "depois" com eles e o número de cada item
+     do texto marcado em cima do elemento. A interface do editor fica fora dos dois. */
+  async function tirarPrints() {
+    if (!window.__ajusteFoto) return [];
+    guardar();
+    const marca = new Date().toLocaleString('sv-SE').replace(/[: ]/g, '-');
+    const vivos = [...alteracoes.entries()].filter(([, s]) => mudou(s) && !(s.novo && s.removido));
+    // Mesma numeração do texto: as larguras maiores vêm antes da atual.
+    const telas = guardado?.telas ?? {};
+    let n = Object.keys(telas).map(Number).filter((w) => w > telaAtual).reduce((t, w) => t + telas[w].length, 0);
+    const displayDaUi = host.style.display;
+    host.style.display = 'none';
+    const estilos = vivos.map(([el]) => el.getAttribute('style'));
+    const marcas = document.createElement('div');
+    try {
+      vivos.forEach(([el, s]) => {
+        if (s.novo) el.style.setProperty('display', 'none', 'important');
+        else if (s.orig.estiloInline == null) el.removeAttribute('style');
+        else el.setAttribute('style', s.orig.estiloInline);
+      });
+      const antes = await window.__ajusteFoto(`${marca}-antes.jpg`);
+      vivos.forEach(([el], i) => { if (estilos[i] == null) el.removeAttribute('style'); else el.setAttribute('style', estilos[i]); });
+      marcas.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2147483646;pointer-events:none;';
+      for (const [el, s] of vivos) {
+        n++;
+        const r = el.getBoundingClientRect();
+        const caixa = s.removido
+          ? { x: s.orig.x, y: s.orig.y, w: s.orig.largura, h: s.orig.altura }
+          : { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height };
+        const m = document.createElement('div');
+        m.style.cssText = `all:initial;position:absolute;left:${caixa.x}px;top:${caixa.y}px;width:${caixa.w}px;height:${caixa.h}px;` +
+          `outline:2px ${s.removido ? 'dashed' : 'solid'} #ff5a1f;`;
+        m.innerHTML = `<span style="all:initial;position:absolute;left:-2px;top:-2px;transform:translate(-50%,-50%);min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:11px;background:#ff5a1f;color:#fff;font:700 13px/22px system-ui,sans-serif;text-align:center;">${n}</span>`;
+        marcas.appendChild(m);
+      }
+      document.documentElement.appendChild(marcas);
+      const depois = await window.__ajusteFoto(`${marca}-depois.jpg`);
+      return [`Prints da página inteira: antes ${antes} · depois (com o número de cada item) ${depois}`];
+    } catch (erro) {
+      vivos.forEach(([el], i) => { if (estilos[i] == null) el.removeAttribute('style'); else el.setAttribute('style', estilos[i]); });
+      avisar(`Não consegui tirar os prints (${erro.message}).`);
+      return [];
+    } finally {
+      marcas.remove();
+      host.style.display = displayDaUi;
+    }
+  }
+  async function copiar(comPrints = false) {
+    const prints = comPrints ? await tirarPrints() : [];
+    const texto = relatorio(prints);
     try {
       if (window.__ajusteSalvar) {
         const arquivo = await window.__ajusteSalvar(texto);
@@ -875,4 +985,9 @@
       avisar(`Não consegui copiar (${erro.message}). O texto está no console (F12).`);
     }
   }
+
+  // Por último: a interface usa funções e variáveis definidas ao longo do arquivo.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', garantirUi);
+  else garantirUi();
+  setInterval(garantirUi, 1000);
 })();
