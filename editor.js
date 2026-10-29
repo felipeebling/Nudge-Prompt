@@ -83,6 +83,26 @@
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), largura: Math.round(r.width), altura: Math.round(r.height) };
   };
+  /* Posição de layout, sem o transform: as animações da página (parallax com GSAP, por exemplo)
+     mudam o transform conforme a rolagem, e a conferência ao recarregar ou trocar de tela não pode
+     depender de onde a página estava rolada. Soma a propriedade translate, que é a que o editor usa
+     e a que o CSS final sugere; a rotação é conferida à parte, pela propriedade rotate. */
+  const deslocamento = (v, tamanho) => {
+    let total = 0;
+    for (const [, n, u] of v.replace(/-\s+/g, '-').matchAll(/(-?[\d.]+)(px|%)/g)) total += u === '%' ? num(n) * tamanho / 100 : num(n);
+    return total;
+  };
+  const medirLayout = (el) => {
+    if (!(el instanceof HTMLElement)) return medir(el);
+    let x = 0, y = 0;
+    for (let n = el; n; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
+    const cs = getComputedStyle(el);
+    const [tx = '0px', ty = '0px'] = cs.translate === 'none' ? [] : cs.translate.match(/calc\([^)]*\)|\S+/g);
+    return {
+      x: Math.round(x + deslocamento(tx, el.offsetWidth)), y: Math.round(y + deslocamento(ty, el.offsetHeight)),
+      largura: el.offsetWidth, altura: el.offsetHeight,
+    };
+  };
   // Lado para onde o elemento aponta na horizontal (-1 = já espelhado pela página), somando transform e scale.
   const sinalHorizontal = (cs) => {
     const m = cs.transform.match(/matrix\(([^,]+)/);
@@ -120,6 +140,7 @@
           alturaCss: el.offsetHeight || r.height,
           opacidade: num(cs.opacity, 1),
           x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY),
+          layout: medirLayout(el),
         },
       });
     }
@@ -260,6 +281,7 @@
     return img;
   }
   async function adicionarImagem() {
+    if (window.__ajusteEscolherImagem) avisar('Abrindo a janela de arquivos do Windows…');
     const arquivo = await escolherArquivo().catch(() => null);
     if (!arquivo) { avisar(''); return; }
     urlsNovas.set(arquivo.caminho, arquivo.url);
@@ -281,7 +303,6 @@
       zIndex: img.style.zIndex, opacidade: img.style.opacity,
       pai: seletor(pai), referencia: referencia ? descrever(referencia) : null, codigo: origemDe(referencia ?? pai),
       base: img.offsetParent ? seletor(img.offsetParent) : 'a página',
-    if (window.__ajusteEscolherImagem) avisar('Abrindo a janela de arquivos do Windows…');
     };
     selecionar(img);
     aplicar(img);
@@ -1017,6 +1038,7 @@
     const cs = getComputedStyle(el);
     return {
       orig, valores: copia(s), novo: s.novo, codigo: origemDe(el), final: s.removido ? null : medir(el),
+      finalLayout: s.removido ? null : medirLayout(el),
       estilosFinais: Object.fromEntries(Object.keys(s.estilos).map((p) => [p, cs.getPropertyValue(p)])),
     };
   }
@@ -1040,8 +1062,15 @@
     const votos = [];
     if (v.removido) votos.push(cs.display === 'none' ? 'depois' : 'antes');
     else {
-      const agora = medir(el);
-      if (!perto(r.orig, r.final)) votos.push(perto(agora, r.orig) ? 'antes' : perto(agora, r.final) ? 'depois' : 'diferente');
+      // Registros novos comparam o layout (sem as animações da página); os antigos, a caixa na tela.
+      const [agora, antes, depois] = r.orig.layout && r.finalLayout
+        ? [medirLayout(el), r.orig.layout, r.finalLayout]
+        : [medir(el), r.orig, r.final];
+      if (!perto(antes, depois)) votos.push(perto(agora, antes) ? 'antes' : perto(agora, depois) ? 'depois' : 'diferente');
+      if (r.orig.layout && v.rot) {
+        const giro = num(cs.rotate);
+        votos.push(Math.abs(giro - r.orig.rotate) < 0.5 ? 'antes' : Math.abs(giro - (r.orig.rotate + v.rot)) < 0.5 ? 'depois' : 'diferente');
+      }
       if (v.opacidade != null && v.opacidade !== r.orig.opacidade) {
         const o = num(cs.opacity, 1);
         votos.push(Math.abs(o - r.orig.opacidade) < 0.01 ? 'antes' : Math.abs(o - v.opacidade) < 0.01 ? 'depois' : 'diferente');
