@@ -578,9 +578,23 @@
       painel.classList.toggle('ajuda', !!salvo?.ajuda);
       if (salvo?.guias === false) guiasLigadas = false;
     } catch { /* sem armazenamento: painel no lugar padrão */ }
+    encaixarPainel();
+    addEventListener('resize', encaixarPainel);
     if (avisoPendente) avisar(avisoPendente);
     atualizarPilula();
     atualizarTelas();
+  }
+
+  // A posição guardada é em px: ao abrir numa janela mais estreita (ou trocar para Celular),
+  // o painel podia ficar fora da tela. Traz de volta para dentro, com a mesma folga do arraste.
+  function encaixarPainel() {
+    if (!painel?.style.left) return;
+    // Com o editor desligado o painel está oculto e mede 0: usa a largura fixa dele (300px).
+    const largura = painel.offsetWidth || 300;
+    const altura = Math.min(painel.offsetHeight || 120, 120);
+    const left = Math.min(Math.max(0, parseFloat(painel.style.left) || 0), Math.max(0, innerWidth - largura - 8));
+    const top = Math.min(Math.max(0, parseFloat(painel.style.top) || 0), Math.max(0, innerHeight - altura));
+    Object.assign(painel.style, { left: `${left}px`, top: `${top}px` });
   }
 
   function guardarPainel() {
