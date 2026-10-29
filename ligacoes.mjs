@@ -29,24 +29,32 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
   // "+ Imagem": abre a janela de arquivos do Windows e devolve o caminho e a imagem para a página.
   const config = join(pasta, 'config.json');
   const lerConfig = () => { try { return JSON.parse(readFileSync(config, 'utf8')); } catch { return {}; } };
+  // Uma janela de arquivos por vez: cliques repetidos enquanto ela está aberta não abrem outras.
+  let janelaAberta = null;
   await contexto.exposeBinding('__ajusteEscolherImagem', async () => {
+    if (janelaAberta) return null;
     const inicial = lerConfig().ultimaPasta ?? join(process.env.USERPROFILE ?? pasta, 'Documents');
+    // A janela de arquivos nascia atrás do Chrome: um dono oculto que nunca aparecia não a trazia
+    // para a frente. Agora o dono é mostrado (invisível, 1px, sempre no topo) e ativado antes.
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms',
       '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
-      '$dono = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }',
+      "$dono = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; StartPosition = 'CenterScreen'; Width = 1; Height = 1; Opacity = 0; FormBorderStyle = 'None' }",
+      '$dono.Show(); $dono.Activate()',
       '$d = New-Object System.Windows.Forms.OpenFileDialog',
       "$d.Title = 'Escolha a imagem para adicionar'",
       "$d.Filter = 'Imagens|*.webp;*.png;*.jpg;*.jpeg;*.gif;*.svg;*.avif|Todos os arquivos|*.*'",
       `$d.InitialDirectory = '${inicial.replace(/'/g, "''")}'`,
       "if ($d.ShowDialog($dono) -eq 'OK') { $d.FileName }",
+      '$dono.Close()',
     ].join('; ');
-    const caminho = await new Promise((ok) => {
+    janelaAberta = new Promise((ok) => {
       let resposta = '';
       const ps = spawn('powershell', ['-STA', '-NoProfile', '-Command', script], { stdio: ['ignore', 'pipe', 'ignore'] });
       ps.stdout.on('data', (d) => { resposta += d; });
       ps.on('close', () => ok(resposta.trim()));
     });
+    const caminho = await janelaAberta.finally(() => { janelaAberta = null; });
     if (!caminho) return null;
     const escolhidas = [...new Set([caminho, ...(lerConfig().imagensEscolhidas ?? [])])].slice(0, 200);
     writeFileSync(config, JSON.stringify({ ...lerConfig(), ultimaPasta: dirname(caminho), imagensEscolhidas: escolhidas }, null, 2));

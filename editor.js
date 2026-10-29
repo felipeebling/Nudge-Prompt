@@ -261,7 +261,7 @@
   }
   async function adicionarImagem() {
     const arquivo = await escolherArquivo().catch(() => null);
-    if (!arquivo) return;
+    if (!arquivo) { avisar(''); return; }
     urlsNovas.set(arquivo.caminho, arquivo.url);
     const referencia = selecionado && !grande(selecionado) && selecionado.isConnected ? selecionado : null;
     const pai = referencia?.parentElement ?? document.body;
@@ -281,6 +281,7 @@
       zIndex: img.style.zIndex, opacidade: img.style.opacity,
       pai: seletor(pai), referencia: referencia ? descrever(referencia) : null, codigo: origemDe(referencia ?? pai),
       base: img.offsetParent ? seletor(img.offsetParent) : 'a página',
+    if (window.__ajusteEscolherImagem) avisar('Abrindo a janela de arquivos do Windows…');
     };
     selecionar(img);
     aplicar(img);
