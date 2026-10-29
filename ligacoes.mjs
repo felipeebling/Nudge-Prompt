@@ -1,5 +1,5 @@
 // Funções do Node que o editor chama pela página (copiar, escolher imagem...), e a injeção do editor.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 
@@ -48,8 +48,15 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
       ps.on('close', () => ok(resposta.trim()));
     });
     if (!caminho) return null;
-    writeFileSync(config, JSON.stringify({ ...lerConfig(), ultimaPasta: dirname(caminho) }, null, 2));
+    const escolhidas = [...new Set([caminho, ...(lerConfig().imagensEscolhidas ?? [])])].slice(0, 200);
+    writeFileSync(config, JSON.stringify({ ...lerConfig(), ultimaPasta: dirname(caminho), imagensEscolhidas: escolhidas }, null, 2));
     return { caminho, nome: caminho.split(/[\\/]/).pop(), url: comoDataUrl(caminho) };
+  });
+  // Reler uma imagem nova ao recarregar a página. Só entrega arquivos escolhidos antes na janela de
+  // arquivos: qualquer site aberto nesta janela pode chamar esta função, e ela não pode virar leitor de disco.
+  await contexto.exposeBinding('__ajusteLerImagem', async (_origem, caminho) => {
+    if (!(lerConfig().imagensEscolhidas ?? []).includes(caminho) || !existsSync(caminho)) return null;
+    return comoDataUrl(caminho);
   });
 
   await contexto.addInitScript({ content: readFileSync(join(pasta, 'editor.js'), 'utf8') });

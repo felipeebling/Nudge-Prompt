@@ -77,6 +77,16 @@
 
   /* ---------- estado de cada elemento alterado ---------- */
   const num = (v, padrao = 0) => { const n = parseFloat(v); return Number.isFinite(n) ? n : padrao; };
+  // Posição e tamanho na página (não na tela), para comparar depois de recarregar.
+  const medir = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), largura: Math.round(r.width), altura: Math.round(r.height) };
+  };
+  // Lado para onde o elemento aponta na horizontal (-1 = já espelhado pela página), somando transform e scale.
+  const sinalHorizontal = (cs) => {
+    const m = cs.transform.match(/matrix\(([^,]+)/);
+    return Math.sign((m ? num(m[1], 1) : 1) * (cs.scale === 'none' ? 1 : num(cs.scale.split(' ')[0], 1))) || 1;
+  };
   function estado(el) {
     if (!alteracoes.has(el)) {
       const cs = getComputedStyle(el);
@@ -85,6 +95,8 @@
         dx: 0, dy: 0, rot: 0, removido: false, espelhado: false, novo: null,
         largura: null, altura: null, opacidade: null,
         orig: {
+          descricao: descrever(el), seletor: seletor(el),
+          sinal: sinalHorizontal(cs),
           estiloInline: el.getAttribute('style'),
           translate: cs.translate,
           rotate: num(cs.rotate),
@@ -124,10 +136,12 @@
     if (s.removido) el.style.setProperty('display', 'none', 'important');
     else if (el.style.getPropertyPriority('display') === 'important' && el.style.display === 'none') el.style.removeProperty('display');
     atualizarPainel();
+    agendarGuardar();
   }
   function restaurar(el) {
     const s = alteracoes.get(el);
     if (!s) return;
+    agendarGuardar();
     // Imagem adicionada pelo editor: restaurar é tirar de vez.
     if (s.novo) { el.remove(); alteracoes.delete(el); if (selecionado === el) selecionado = null; return; }
     if (s.orig.estiloInline == null) el.removeAttribute('style'); else el.setAttribute('style', s.orig.estiloInline);
@@ -157,24 +171,32 @@
       entrada.click();
     });
   }
+  // Endereço de cada imagem nova (pelo caminho), para recriá-la ao trocar de tela sem ler o arquivo de novo.
+  const urlsNovas = new Map();
+  async function criarImagem(pai, url, nome, largura, estilo) {
+    const img = new Image();
+    img.src = url;
+    img.alt = '';
+    img.setAttribute('data-ajuste-novo', nome);
+    Object.assign(img.style, {
+      position: 'absolute', display: 'block', width: `${largura}px`, height: 'auto', maxWidth: 'none', pointerEvents: 'none', ...estilo,
+    });
+    pai.appendChild(img);
+    if (!img.complete) await new Promise((ok) => { img.onload = ok; img.onerror = ok; });
+    return img;
+  }
   async function adicionarImagem() {
     const arquivo = await escolherArquivo().catch(() => null);
     if (!arquivo) return;
+    urlsNovas.set(arquivo.caminho, arquivo.url);
     const referencia = selecionado && !grande(selecionado) && selecionado.isConnected ? selecionado : null;
     const pai = referencia?.parentElement ?? document.body;
-    const img = new Image();
-    img.src = arquivo.url;
-    img.alt = '';
-    img.setAttribute('data-ajuste-novo', arquivo.nome);
     const largura = Math.round(referencia ? Math.min(referencia.offsetWidth || 240, 600) : 240);
     const cs = referencia ? getComputedStyle(referencia) : null;
-    Object.assign(img.style, {
-      position: 'absolute', display: 'block', width: `${largura}px`, height: 'auto', maxWidth: 'none',
-      zIndex: cs?.zIndex && cs.zIndex !== 'auto' ? cs.zIndex : '', opacity: cs ? cs.opacity : '1', pointerEvents: 'none',
-    });
     // Coloca primeiro e mede a referência de posição (o ancestral posicionado), para centralizar na tela.
-    pai.appendChild(img);
-    if (!img.complete) await new Promise((ok) => { img.onload = ok; img.onerror = ok; });
+    const img = await criarImagem(pai, arquivo.url, arquivo.nome, largura, {
+      zIndex: cs?.zIndex && cs.zIndex !== 'auto' ? cs.zIndex : '', opacity: cs ? cs.opacity : '1',
+    });
     const base = (img.offsetParent ?? document.documentElement).getBoundingClientRect();
     const left = Math.round(innerWidth / 2 - base.left - largura / 2);
     const top = Math.round(innerHeight / 2 - base.top - img.offsetHeight / 2);
@@ -182,6 +204,7 @@
     const s = estado(img);
     s.novo = {
       nome: arquivo.nome, caminho: arquivo.caminho, left, top, largura,
+      zIndex: img.style.zIndex, opacidade: img.style.opacity,
       pai: seletor(pai), referencia: referencia ? descrever(referencia) : null, codigo: origemDe(referencia ?? pai),
       base: img.offsetParent ? seletor(img.offsetParent) : 'a página',
     };
@@ -319,7 +342,7 @@
       if (acao === 'remover') remover(selecionado);
       if (acao === 'espelhar') espelhar(selecionado);
       if (acao === 'imagem') adicionarImagem();
-      if (acao === 'limpar') { [...alteracoes.keys()].forEach(restaurar); desfazer.length = 0; atualizarPainel(); }
+      if (acao === 'limpar') { [...alteracoes.keys()].forEach(restaurar); parados = []; desfazer.length = 0; atualizarPainel(); guardar(); }
       if (acao === 'anim') alternarAnimacoes(e.target);
       const item = e.target.closest?.('li[data-i]');
       if (item) {
@@ -353,6 +376,8 @@
       painel.classList.toggle('min', !!salvo?.min);
       painel.classList.toggle('ajuda', !!salvo?.ajuda);
     } catch { /* sem armazenamento: painel no lugar padrão */ }
+    if (avisoPendente) avisar(avisoPendente);
+    atualizarPilula();
   }
 
   function guardarPainel() {
@@ -427,7 +452,15 @@
     raiz.querySelector('.alterados').innerHTML = lista(alterados);
     raiz.querySelector('.total').textContent = String([...alteracoes.values()].filter(mudou).length);
   }
-  const avisar = (texto) => { raiz.querySelector('.aviso').textContent = texto; };
+  // Antes de a interface existir, o aviso espera e aparece quando ela for criada.
+  let avisoPendente = '';
+  const avisar = (texto) => { if (raiz) raiz.querySelector('.aviso').textContent = texto; else avisoPendente = texto; };
+  // Desligado, o botão mostra quantas alterações estão na tela (ex.: reaplicadas depois de recarregar).
+  function atualizarPilula() {
+    if (!raiz) return;
+    const n = [...alteracoes.values()].filter(mudou).length;
+    raiz.querySelector('.pilula').textContent = ligado ? '✕ Desligar ajuste' : `✎ Ajuste visual${n ? ` · ${n}` : ''}`;
+  }
 
   /* ---------- arrastar, redimensionar ---------- */
   function iniciarArrasto(e, modo) {
@@ -565,7 +598,7 @@
     ligado = !ligado;
     if (!host) criarUi();
     host.classList.toggle('on', ligado);
-    raiz.querySelector('.pilula').textContent = ligado ? '✕ Desligar ajuste' : '✎ Ajuste visual';
+    atualizarPilula();
     document.documentElement.style.cursor = ligado ? 'crosshair' : '';
     if (ligado) { atualizarPainel(); requestAnimationFrame(laco); }
   }
@@ -581,10 +614,161 @@
   else garantirUi();
   setInterval(garantirUi, 1000);
 
+  /* ---------- guardar e reaplicar ao recarregar ----------
+     Cada alteração vira um registro guardado no navegador, por página. Ao recarregar (por exemplo,
+     quando o agente muda o código e o servidor recarrega), cada registro é conferido:
+     - o elemento ainda está como era antes do ajuste → reaplica o ajuste;
+     - já está como ficou depois do ajuste → o código já tem a mudança, não reaplica;
+     - está diferente dos dois → não mexe e avisa, para você conferir. */
+  const chaveGuardada = () => `ajusteVisual:${location.pathname}${location.search}`;
+  let telaAtual = innerWidth;
+  let guardado = null; // { telas: { [largura]: [registro] } }
+  const lerGuardado = () => {
+    try { return JSON.parse(localStorage.getItem(chaveGuardada()) || 'null') ?? { telas: {} }; } catch { return { telas: {} }; }
+  };
+  let reaplicando = false;
+  // Até reaplicar o que estava guardado, não grava nada (senão um recarregar rápido apagaria tudo).
+  let carregado = false;
+  // Registros que não deu para reaplicar (código diferente do esperado, elemento não achado):
+  // continuam guardados e no texto, até você limpar.
+  let parados = [];
+  let agendado = 0;
+  function agendarGuardar() {
+    if (reaplicando) return;
+    clearTimeout(agendado);
+    agendado = setTimeout(guardar, 300);
+  }
+  function guardar() {
+    clearTimeout(agendado);
+    if (!carregado) return;
+    guardado ??= lerGuardado();
+    const registros = [...registrosAtuais(), ...parados];
+    if (registros.length) guardado.telas[telaAtual] = registros;
+    else delete guardado.telas[telaAtual];
+    try {
+      if (Object.keys(guardado.telas).length) localStorage.setItem(chaveGuardada(), JSON.stringify(guardado));
+      else localStorage.removeItem(chaveGuardada());
+    } catch { /* sem armazenamento: só não sobrevive ao recarregar */ }
+    atualizarPilula();
+  }
+  function registro(el, s) {
+    const { estiloInline, ...orig } = s.orig;
+    return { orig, valores: copia(s), novo: s.novo, codigo: origemDe(el), final: s.removido ? null : medir(el) };
+  }
+  // Imagem nova que depois foi removida não conta.
+  const registrosAtuais = () => [...alteracoes.entries()].filter(([, s]) => mudou(s) && !(s.novo && s.removido)).map(([el, s]) => registro(el, s));
+
+  function acharElemento(r) {
+    let el = null;
+    try { el = document.querySelector(r.orig.seletor); } catch { /* seletor inválido nesta página */ }
+    if (el && descrever(el) === r.orig.descricao) return el;
+    // O seletor mudou (ex.: entrou um elemento antes); procura um único elemento com a mesma descrição.
+    const tag = r.orig.descricao.match(/^[a-z0-9-]+/)?.[0] ?? '*';
+    const iguais = [...document.querySelectorAll(tag)].filter((n) => !n.closest('[data-ajuste-visual]') && descrever(n) === r.orig.descricao);
+    return iguais.length === 1 ? iguais[0] : null;
+  }
+  const perto = (a, b) => a && b && Math.abs(a.x - b.x) <= 4 && Math.abs(a.y - b.y) <= 4 && Math.abs(a.largura - b.largura) <= 4 && Math.abs(a.altura - b.altura) <= 4;
+  // 'antes' (como era antes do ajuste), 'depois' (já com a mudança no código) ou 'diferente'.
+  function conferir(el, r) {
+    const v = r.valores;
+    const cs = getComputedStyle(el);
+    const votos = [];
+    if (v.removido) votos.push(cs.display === 'none' ? 'depois' : 'antes');
+    else {
+      const agora = medir(el);
+      if (!perto(r.orig, r.final)) votos.push(perto(agora, r.orig) ? 'antes' : perto(agora, r.final) ? 'depois' : 'diferente');
+      if (v.opacidade != null && v.opacidade !== r.orig.opacidade) {
+        const o = num(cs.opacity, 1);
+        votos.push(Math.abs(o - r.orig.opacidade) < 0.01 ? 'antes' : Math.abs(o - v.opacidade) < 0.01 ? 'depois' : 'diferente');
+      }
+      if (v.espelhado) votos.push(sinalHorizontal(cs) === r.orig.sinal ? 'antes' : 'depois');
+    }
+    if (votos.every((x) => x === 'antes')) return 'antes';
+    return votos.every((x) => x === 'depois') ? 'depois' : 'diferente';
+  }
+  async function recriarImagem(r) {
+    const n = r.novo;
+    // Se a página já tem uma imagem com este arquivo, o código já recebeu a imagem nova.
+    if ([...document.images].some((img) => !img.dataset.ajusteNovo && nomeArquivo(img.currentSrc || img.src) === n.nome)) return 'depois';
+    const url = urlsNovas.get(n.caminho) ?? await window.__ajusteLerImagem?.(n.caminho).catch(() => null);
+    if (!url) return 'sumiu';
+    urlsNovas.set(n.caminho, url);
+    let pai = null;
+    try { pai = document.querySelector(n.pai); } catch { /* fica na página */ }
+    const img = await criarImagem(pai ?? document.body, url, n.nome, n.largura, {
+      left: `${n.left}px`, top: `${n.top}px`, zIndex: n.zIndex ?? '', opacity: n.opacidade ?? '1',
+    });
+    const s = estado(img);
+    s.novo = n;
+    Object.assign(s, r.valores);
+    aplicar(img);
+    return 'antes';
+  }
+  async function reaplicar(registros) {
+    const conta = { antes: 0, depois: 0, diferente: [], sumiu: [] };
+    parados = [];
+    const parar = (r, motivo) => { conta[motivo].push(r.orig.descricao); parados.push({ ...r, parado: motivo }); };
+    reaplicando = true;
+    try {
+      for (const r of registros) {
+        if (r.novo) {
+          const res = await recriarImagem(r);
+          if (res === 'sumiu') parar(r, 'sumiu'); else conta[res]++;
+          continue;
+        }
+        const el = acharElemento(r);
+        if (!el) {
+          // Elemento que era para remover e não existe mais: o código já tirou.
+          if (r.valores.removido) conta.depois++; else parar(r, 'sumiu');
+          continue;
+        }
+        const res = conferir(el, r);
+        if (res === 'antes') {
+          const s = estado(el);
+          Object.assign(s, r.valores);
+          aplicar(el);
+          conta.antes++;
+        } else if (res === 'depois') conta.depois++;
+        else parar(r, 'diferente');
+      }
+    } finally {
+      reaplicando = false;
+      carregado = true;
+    }
+    guardar();
+    return conta;
+  }
+  function resumoConferencia(conta) {
+    const partes = [];
+    if (conta.antes) partes.push(`${conta.antes} reaplicada(s)`);
+    if (conta.depois) partes.push(`${conta.depois} já no código`);
+    if (conta.diferente.length) partes.push(`${conta.diferente.length} diferente(s) do esperado, não reaplicada(s): ${conta.diferente.join('; ')}`);
+    if (conta.sumiu.length) partes.push(`${conta.sumiu.length} não encontrada(s): ${conta.sumiu.join('; ')}`);
+    return partes.join(' · ');
+  }
+  async function reaplicarGuardado() {
+    guardado = lerGuardado();
+    const registros = guardado.telas[telaAtual] ?? [];
+    if (!registros.length) { carregado = true; atualizarPilula(); return; }
+    const conta = await reaplicar(registros);
+    const resumo = resumoConferencia(conta);
+    console.info(`[Ajuste visual] Depois de recarregar: ${resumo}`);
+    avisar(`Depois de recarregar: ${resumo}`);
+  }
+  // Espera a página assentar (fontes, imagens) antes de medir e comparar.
+  const quandoCarregar = () => setTimeout(reaplicarGuardado, 400);
+  if (document.readyState === 'complete') quandoCarregar();
+  else addEventListener('load', quandoCarregar, { once: true });
+  addEventListener('pagehide', guardar);
+
   /* ---------- texto das alterações ---------- */
   function relatorio() {
-    // Imagem nova que depois foi removida não entra no texto.
-    const itens = [...alteracoes.entries()].filter(([, s]) => mudou(s) && !(s.novo && s.removido));
+    guardar();
+    const itens = [...registrosAtuais(), ...parados];
+    const avisoParado = {
+      diferente: '   atenção: depois de recarregar, este elemento não estava nem como antes nem como depois do ajuste; confira se ainda vale',
+      sumiu: '   atenção: depois de recarregar, não achei este elemento na página; confira se ainda vale',
+    };
     const linhas = [
       'Ajuste visual — alterações feitas na tela',
       `Página: ${location.href}`,
@@ -592,11 +776,11 @@
       'Aplique no código-fonte que gera estes elementos. Os valores são relativos à posição original, nesta largura de tela.',
       '',
     ];
-    itens.forEach(([el, s], i) => {
-      const o = s.orig;
-      if (s.novo) {
+    itens.forEach(({ orig: o, valores: s, novo, codigo, parado }, i) => {
+      const atencao = parado ? [avisoParado[parado]] : [];
+      if (novo) {
         // Imagem nova: valores finais (não deltas), sem rotação no left/top.
-        const n = s.novo;
+        const n = novo;
         const largura = s.largura ?? n.largura;
         const extras = [
           s.rot ? `rotação ${s.rot}°` : '',
@@ -605,6 +789,7 @@
         ].filter(Boolean);
         linhas.push(
           `${i + 1}. ADICIONAR imagem nova  [${n.nome}]`,
+          ...atencao,
           `   arquivo: ${n.caminho}`,
           `   colocar dentro de: ${n.pai}` + (n.referencia ? ` (mesma camada de ${n.referencia})` : ''),
           ...(n.codigo ? [`   código do elemento de referência: ${n.codigo}`] : []),
@@ -627,11 +812,11 @@
       if (s.espelhado) partes.push('   espelhar: inverter na horizontal');
       // Removido vale mais que qualquer outro ajuste no mesmo elemento.
       if (s.removido) partes.splice(0, partes.length, '   remover: tirar este elemento da página');
-      const codigo = origemDe(el);
       linhas.push(
-        `${i + 1}. ${descrever(el)}`,
+        `${i + 1}. ${o.descricao}`,
+        ...atencao,
         ...(codigo ? [`   código: ${codigo}`] : []),
-        `   seletor: ${seletor(el)}`,
+        `   seletor: ${o.seletor}`,
         `   posição original na página: x ${o.x}px, y ${o.y}px · tamanho ${Math.round(o.largura)}×${Math.round(o.altura)}px`,
         ...partes,
         '',

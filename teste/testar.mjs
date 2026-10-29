@@ -17,9 +17,13 @@ const executavel = [
   'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
 ].find(existsSync);
 
+// trocas: simula o agente mudando o código da página entre um recarregamento e outro.
+let trocas = [];
 const servidor = createServer((req, res) => {
+  let html = readFileSync(join(pasta, 'teste', 'pagina.html'), 'utf8');
+  for (const [de, para] of trocas) html = html.replace(de, para);
   res.setHeader('content-type', 'text/html; charset=utf-8');
-  res.end(readFileSync(join(pasta, 'teste', 'pagina.html')));
+  res.end(html);
 }).listen(0);
 const endereco = `http://localhost:${servidor.address().port}/`;
 
@@ -65,6 +69,38 @@ conferir('mostra o arquivo e a linha do código (Astro)', texto.includes('códig
 await arrastar(await centro('.arte-b'), -30, 0);
 texto = await relatorio();
 conferir('sem marca no elemento, usa a do ancestral', /código: C:\/site\/src\/pages\/teste\.astro:20 \(marca do ancestral <main\.palco>\)/.test(texto), texto);
+
+/* ---------- 3. reaplicar ao recarregar ---------- */
+const caixa = (seletor) => pagina.locator(seletor).first().boundingBox();
+const aviso = () => pagina.locator('[data-ajuste-visual] .aviso').textContent();
+const recarregar = async () => { await pagina.reload(); await pagina.waitForTimeout(900); };
+const igual = (a, b) => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
+const antesA = await caixa('.arte-a');
+await recarregar();
+let depoisA = await caixa('.arte-a');
+conferir('recarregar reaplica o ajuste', igual(antesA, depoisA), JSON.stringify({ antesA, depoisA }));
+conferir('avisa quantas foram reaplicadas', (await aviso()).includes('2 reaplicada(s)'), await aviso());
+// O código mudou de outro jeito: não reaplica, avisa e mantém o pedido guardado e no texto.
+trocas = [['.arte-a { left: 40px; top: 60px; }', '.arte-a { left: 300px; top: 60px; }']];
+await recarregar();
+conferir('diferente do esperado: avisa e não reaplica', (await aviso()).includes('diferente(s) do esperado'), await aviso());
+await ligar();
+conferir('o pedido parado continua no texto', (await relatorio()).includes('atenção: depois de recarregar'));
+trocas = [];
+await recarregar();
+conferir('voltando o código, reaplica o que estava parado', (await aviso()).includes('2 reaplicada(s)'), await aviso());
+// O agente aplicou o ajuste da .arte-a no código (left 40 → 90, top 60 → 80).
+trocas = [['.arte-a { left: 40px; top: 60px; }', '.arte-a { left: 90px; top: 80px; }']];
+await recarregar();
+depoisA = await caixa('.arte-a');
+conferir('com a mudança já no código, não move de novo', igual(antesA, depoisA), JSON.stringify({ antesA, depoisA }));
+conferir('avisa que já está no código', (await aviso()).includes('1 já no código'), await aviso());
+trocas = [];
+await recarregar();
+await ligar();
+await botao('limpar').click();
+await recarregar();
+conferir('"Limpar tudo" também apaga o que estava guardado', !(await aviso()), await aviso());
 
 console.log(`\n${total - falhas.length}/${total} conferências passaram.`);
 if (falhas.length) console.log(`\nFalhas:\n- ${falhas.join('\n- ')}`);
