@@ -142,6 +142,70 @@ conferir('o texto aponta os prints', texto.includes('Prints da página inteira: 
 conferir('a interface volta depois dos prints', await pagina.locator('[data-ajuste-visual] .pilula').isVisible());
 console.log(`     prints em ${join(saida, 'prints')}`);
 
+/* ---------- 6. texto e estilo ---------- */
+await botao('limpar').click();
+const h2 = await centro('.card h2');
+await pagina.mouse.dblclick(h2.x, h2.y);
+await pagina.keyboard.type('Bem-vindo a São Pedro');
+await pagina.keyboard.press('Enter');
+conferir('duplo clique edita o texto na página', (await pagina.locator('.card h2').innerText()) === 'Bem-vindo a São Pedro');
+const campo = (prop) => pagina.locator(`[data-ajuste-visual] input[data-prop="${prop}"]`);
+await pagina.locator('[data-ajuste-visual] details.estilo summary').click();
+await campo('font-size').fill('34px');
+await campo('font-size').press('Enter');
+await campo('color').fill('rgb(200, 0, 0)');
+await campo('color').press('Enter');
+conferir('o campo de estilo muda o elemento', await pagina.locator('.card h2').evaluate((el) => getComputedStyle(el).fontSize === '34px'));
+texto = await relatorio();
+conferir('o texto mostra o antes e o depois do texto', texto.includes('texto: "Conheça a cidade" → "Bem-vindo a São Pedro"'), texto);
+conferir('o texto mostra o estilo alterado', texto.includes('tamanho da fonte: 28px → 34px') && texto.includes('cor do texto: rgb(58, 42, 26) → rgb(200, 0, 0)'), texto);
+conferir('o estilo entra no CSS final', texto.includes('font-size: 34px'), texto);
+await pagina.keyboard.press('Control+z');
+await pagina.keyboard.press('Control+z');
+await pagina.keyboard.press('Control+z');
+conferir('desfazer volta o estilo e o texto', (await pagina.locator('.card h2').innerText()) === 'Conheça a cidade' &&
+  await pagina.locator('.card h2').evaluate((el) => getComputedStyle(el).fontSize === '28px'));
+
+/* ---------- 7. vários elementos ---------- */
+await pagina.keyboard.press('Escape');
+await pagina.mouse.click((await centro('.arte-a')).x, (await centro('.arte-a')).y);
+await pagina.keyboard.down('Shift');
+await pagina.mouse.click((await centro('.botao')).x, (await centro('.botao')).y);
+await pagina.keyboard.up('Shift');
+conferir('Shift+clique põe na seleção', (await pagina.locator('[data-ajuste-visual] .sel-info').innerText()).includes('+ 1 na seleção'));
+const antesBotao = await caixa('.botao');
+await pagina.keyboard.press('Shift+ArrowDown');
+const depoisBotao = await caixa('.botao');
+conferir('as setas movem a seleção inteira', Math.round(depoisBotao.y - antesBotao.y) === 10, JSON.stringify([antesBotao, depoisBotao]));
+await pagina.locator('[data-ajuste-visual] button[data-alinhar="topo"]').click();
+const [ta, tb] = [await caixa('.arte-a'), await caixa('.botao')];
+conferir('alinhar em cima iguala o topo', Math.abs(ta.y - tb.y) < 1, JSON.stringify([ta, tb]));
+
+/* ---------- 8. guias e medidas ---------- */
+await botao('limpar').click();
+await pagina.keyboard.press('Escape');
+// Arrasta a .arte-a até quase encostar na borda esquerda do card: deve grudar nela.
+const card = await caixa('.card');
+const arte = await caixa('.arte-a');
+await arrastar(await centro('.arte-a'), Math.round(card.x - arte.x) + 3, 0);
+conferir('ao arrastar, gruda na guia mais próxima', Math.abs((await caixa('.arte-a')).x - card.x) < 1, JSON.stringify([await caixa('.arte-a'), card]));
+await pagina.mouse.move((await centro('.botao')).x, (await centro('.botao')).y);
+await pagina.waitForTimeout(100);
+conferir('mostra a medida até o elemento sob o mouse', await pagina.locator('[data-ajuste-visual] .medida').first().isVisible());
+
+/* ---------- 9. notas ---------- */
+await pagina.locator('[data-ajuste-visual] .nota').fill('Trocar esta forma por uma foto da praça');
+await pagina.keyboard.press('Escape');
+await pagina.keyboard.press('Escape');
+await pagina.locator('[data-ajuste-visual] .nota').fill('Deixar a página mais clara');
+texto = await relatorio();
+conferir('a nota do elemento entra no texto', texto.includes('nota: Trocar esta forma por uma foto da praça'), texto);
+conferir('a nota geral entra no texto', texto.includes('Nota geral: Deixar a página mais clara'), texto);
+await recarregar();
+await ligar();
+conferir('"Limpar tudo" limpa também as outras larguras', !texto.includes('=== Tela de 390px'), texto);
+conferir('a nota geral volta depois de recarregar', (await pagina.locator('[data-ajuste-visual] .nota').inputValue()) === 'Deixar a página mais clara');
+
 await telaBotao(0).click();
 await pagina.waitForTimeout(900);
 conferir('botão Janela tira a largura emulada', await pagina.evaluate(() => innerWidth) !== 1280);

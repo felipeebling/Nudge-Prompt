@@ -9,6 +9,7 @@
   const desfazer = [];
   let ligado = false;
   let selecionado = null;
+  const extras = new Set(); // outros elementos escolhidos com Shift+clique, além do selecionado
   let candidatos = [];
   let arrasto = null;
   let animacoesParadas = false;
@@ -87,15 +88,24 @@
     const m = cs.transform.match(/matrix\(([^,]+)/);
     return Math.sign((m ? num(m[1], 1) : 1) * (cs.scale === 'none' ? 1 : num(cs.scale.split(' ')[0], 1))) || 1;
   };
+  // Propriedades que o painel "Estilo" deixa mudar, com o nome que aparece no texto.
+  const PROPRIEDADES = [
+    ['color', 'cor do texto'], ['background-color', 'cor de fundo'], ['font-size', 'tamanho da fonte'],
+    ['font-weight', 'peso da fonte'], ['line-height', 'altura da linha'], ['letter-spacing', 'espaço entre letras'],
+    ['padding', 'espaço interno (padding)'], ['margin', 'margem (margin)'], ['border-radius', 'arredondamento'],
+    ['z-index', 'camada (z-index)'],
+  ];
+  const nomeProp = Object.fromEntries(PROPRIEDADES);
   function estado(el) {
     if (!alteracoes.has(el)) {
       const cs = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       alteracoes.set(el, {
         dx: 0, dy: 0, rot: 0, removido: false, espelhado: false, novo: null,
-        largura: null, altura: null, opacidade: null,
+        largura: null, altura: null, opacidade: null, texto: null, estilos: {}, nota: '',
         orig: {
           descricao: descrever(el), seletor: seletor(el),
+          estilos: Object.fromEntries(PROPRIEDADES.map(([p]) => [p, cs.getPropertyValue(p)])),
           sinal: sinalHorizontal(cs),
           // Para o CSS final: como a página já posiciona e gira o elemento, e a largura do contêiner.
           posicao: cs.position,
@@ -115,14 +125,39 @@
     }
     return alteracoes.get(el);
   }
-  const copia = (s) => ({ dx: s.dx, dy: s.dy, rot: s.rot, largura: s.largura, altura: s.altura, opacidade: s.opacidade, removido: s.removido, espelhado: s.espelhado });
-  function guardarDesfazer(el) {
-    const s = estado(el);
-    desfazer.push({ el, antes: copia(s) });
+  const copia = (s) => ({
+    dx: s.dx, dy: s.dy, rot: s.rot, largura: s.largura, altura: s.altura, opacidade: s.opacidade, removido: s.removido,
+    espelhado: s.espelhado, texto: s.texto, estilos: { ...s.estilos }, nota: s.nota,
+  });
+  // Um passo de desfazer pode ter vários elementos (ex.: mover a seleção inteira).
+  function guardarDesfazer(els) {
+    const lista = (Array.isArray(els) ? els : [els]).filter(Boolean);
+    if (!lista.length) return;
+    desfazer.push(lista.map((el) => ({ el, antes: copia(estado(el)) })));
     if (desfazer.length > 200) desfazer.shift();
+  }
+  // Valor que a página tinha no atributo style para uma propriedade (para devolver ao desfazer um estilo).
+  function inlineOriginal(s, prop) {
+    if (!s.orig.inline) {
+      const tmp = document.createElement('div');
+      tmp.setAttribute('style', s.orig.estiloInline ?? '');
+      s.orig.inline = Object.fromEntries(PROPRIEDADES.map(([p]) => [p, [tmp.style.getPropertyValue(p), tmp.style.getPropertyPriority(p)]]));
+    }
+    return s.orig.inline[prop];
   }
   function aplicar(el) {
     const s = estado(el);
+    for (const [p] of PROPRIEDADES) {
+      if (s.estilos[p] != null) el.style.setProperty(p, s.estilos[p], 'important');
+      else if (el.style.getPropertyValue(p) !== inlineOriginal(s, p)[0]) el.style.setProperty(p, ...inlineOriginal(s, p));
+    }
+    // Texto editado: na edição o texto já está lá; ao desfazer ou reaplicar, troca ou devolve o original.
+    if (s.texto != null) {
+      s.orig.html ??= el.innerHTML;
+      s.orig.texto ??= el.innerText;
+      if (el.innerText !== s.texto && editando !== el) el.innerText = s.texto;
+    }
+    else if (s.orig.html != null && el.innerHTML !== s.orig.html && editando !== el) el.innerHTML = s.orig.html;
     const [tx = '0px', ty = '0px'] = s.orig.translate === 'none' ? [] : s.orig.translate.split(' ');
     el.style.setProperty('translate', `calc(${tx} + ${s.dx}px) calc(${ty} + ${s.dy}px)`, 'important');
     el.style.setProperty('rotate', `${s.orig.rotate + s.rot}deg`, 'important');
@@ -146,18 +181,53 @@
     const s = alteracoes.get(el);
     if (!s) return;
     agendarGuardar();
+    extras.delete(el);
     // Imagem adicionada pelo editor: restaurar é tirar de vez.
     if (s.novo) { el.remove(); alteracoes.delete(el); if (selecionado === el) selecionado = null; return; }
+    if (editando === el) terminarTexto();
+    if (s.orig.html != null && el.innerHTML !== s.orig.html) el.innerHTML = s.orig.html;
     if (s.orig.estiloInline == null) el.removeAttribute('style'); else el.setAttribute('style', s.orig.estiloInline);
     alteracoes.delete(el);
   }
-  const mudou = (s) => s.novo || s.removido || s.espelhado || s.dx || s.dy || s.rot || s.largura != null || s.altura != null || s.opacidade != null;
-  function espelhar(el) {
-    if (!el) return;
+  const mudou = (s) => s.novo || s.removido || s.espelhado || s.dx || s.dy || s.rot || s.largura != null || s.altura != null ||
+    s.opacidade != null || s.texto != null || Object.keys(s.estilos).length || s.nota;
+  function espelhar(els) {
+    if (!els.length) return;
+    guardarDesfazer(els);
+    for (const el of els) { estado(el).espelhado = !estado(el).espelhado; aplicar(el); }
+  }
+
+  /* Editar texto: duplo clique (ou "Editar texto") no elemento escolhido. Enter ou Esc termina;
+     Shift+Enter quebra a linha. No texto sai o antes e o depois. */
+  let editando = null;
+  let editavelAntes = null;
+  function editarTexto(el) {
+    if (!el || editando || !textoCurto(el)) { if (el && !textoCurto(el)) avisar('Este elemento não tem texto para editar.'); return; }
     guardarDesfazer(el);
     const s = estado(el);
-    s.espelhado = !s.espelhado;
+    s.orig.html ??= el.innerHTML;
+    s.orig.texto ??= el.innerText;
+    editando = el;
+    editavelAntes = el.getAttribute('contenteditable');
+    el.setAttribute('contenteditable', 'plaintext-only');
+    el.focus();
+    const faixa = document.createRange();
+    faixa.selectNodeContents(el);
+    getSelection().removeAllRanges();
+    getSelection().addRange(faixa);
+    el.addEventListener('blur', terminarTexto, { once: true });
+    avisar('Editando o texto. Enter ou Esc termina; Shift+Enter quebra a linha.');
+  }
+  function terminarTexto() {
+    const el = editando;
+    if (!el) return;
+    editando = null;
+    if (editavelAntes == null) el.removeAttribute('contenteditable'); else el.setAttribute('contenteditable', editavelAntes);
+    const s = estado(el);
+    const novo = el.innerText;
+    s.texto = novo === s.orig.texto ? null : novo;
     aplicar(el);
+    avisar(s.texto != null ? 'Texto alterado.' : '');
   }
 
   /* "+ Imagem": entra na mesma camada do elemento escolhido (ex.: junto das gravuras de fundo),
@@ -216,11 +286,10 @@
     aplicar(img);
     avisar(`Imagem adicionada: ${arquivo.nome}. Arraste, redimensione ou gire à vontade.`);
   }
-  function remover(el) {
-    if (!el) return;
-    guardarDesfazer(el);
-    estado(el).removido = true;
-    aplicar(el);
+  function remover(els) {
+    if (!els.length) return;
+    guardarDesfazer(els);
+    for (const el of els) { estado(el).removido = true; aplicar(el); }
     avisar('Removido da tela. Ctrl+Z ou "Restaurar este" traz de volta.');
   }
 
@@ -249,7 +318,48 @@
   }
   function selecionar(el) {
     selecionado = el;
+    extras.clear();
     atualizarPainel();
+  }
+  // Seleção inteira: o escolhido primeiro, depois os do Shift+clique.
+  const selecao = () => (selecionado ? [selecionado, ...extras] : []).filter((el) => el.isConnected);
+  // Shift+clique põe ou tira um elemento da seleção.
+  function alternarNaSelecao(el) {
+    if (el === selecionado) { selecionado = [...extras][0] ?? null; extras.delete(selecionado); }
+    else if (extras.has(el)) extras.delete(el);
+    else if (!selecionado) selecionado = el;
+    else extras.add(el);
+    atualizarPainel();
+  }
+  /* Alinhar e distribuir a seleção, tomando como referência a caixa que envolve todos. */
+  function alinhar(como) {
+    const els = selecao();
+    if (els.length < 2) return;
+    guardarDesfazer(els);
+    const caixas = els.map((el) => ({ el, r: el.getBoundingClientRect() }));
+    const esq = Math.min(...caixas.map((c) => c.r.left)), dir = Math.max(...caixas.map((c) => c.r.right));
+    const topo = Math.min(...caixas.map((c) => c.r.top)), base = Math.max(...caixas.map((c) => c.r.bottom));
+    const mover = (c, x, y) => { const s = estado(c.el); s.dx += Math.round(x); s.dy += Math.round(y); aplicar(c.el); };
+    for (const c of caixas) {
+      if (como === 'esquerda') mover(c, esq - c.r.left, 0);
+      if (como === 'centro') mover(c, (esq + dir) / 2 - (c.r.left + c.r.width / 2), 0);
+      if (como === 'direita') mover(c, dir - c.r.right, 0);
+      if (como === 'topo') mover(c, 0, topo - c.r.top);
+      if (como === 'meio') mover(c, 0, (topo + base) / 2 - (c.r.top + c.r.height / 2));
+      if (como === 'base') mover(c, 0, base - c.r.bottom);
+    }
+    // Distribuir: espaços iguais entre um e outro, mantendo os das pontas no lugar.
+    if (como === 'distH' || como === 'distV') {
+      const h = como === 'distH';
+      const ordem = caixas.sort((a, b) => (h ? a.r.left - b.r.left : a.r.top - b.r.top));
+      const tamanho = (c) => (h ? c.r.width : c.r.height);
+      const espaco = ((h ? dir - esq : base - topo) - ordem.reduce((t, c) => t + tamanho(c), 0)) / (ordem.length - 1);
+      let pos = h ? esq : topo;
+      for (const c of ordem) {
+        mover(c, h ? pos - c.r.left : 0, h ? 0 : pos - c.r.top);
+        pos += tamanho(c) + espaco;
+      }
+    }
   }
 
   /* ---------- interface ---------- */
@@ -302,6 +412,25 @@
         .telas button { padding: 2px 7px; }
         .telas button.on { background: #ff5a1f; }
         .telas button.tem::after { content: ' •'; color: #ffb08a; }
+        .extra { outline: 2px dashed #ff5a1f; }
+        .guia { position: fixed; pointer-events: none; display: none; background: #ff2d87; }
+        .guia.gx { top: 0; width: 1px; height: 100vh; }
+        .guia.gy { left: 0; height: 1px; width: 100vw; }
+        .medida { position: fixed; pointer-events: none; display: none; background: #ff2d87; }
+        .medida span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #ff2d87; color: #fff;
+          font: 600 11px/16px system-ui, sans-serif; padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+        .alinhar { display: none; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+        .alinhar.on { display: flex; }
+        .alinhar button { padding: 2px 7px; }
+        details { margin: 6px 0 0; }
+        summary { cursor: pointer; color: #c9c9cf; font-weight: 600; }
+        .estilos { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 6px; align-items: center; margin-top: 4px; }
+        .estilos label { color: #a0a0a5; white-space: nowrap; }
+        .estilos input[type=text] { width: 100%; min-width: 0; }
+        input, textarea { background: #2a2a2d; color: #f2f2f2; border: 1px solid #3a3a3d; border-radius: 4px; padding: 2px 5px; }
+        input[type=color] { width: 22px; height: 20px; padding: 0; border: 0; background: none; }
+        input.mudou { border-color: #ff5a1f; }
+        textarea { width: 100%; min-height: 44px; resize: vertical; margin-top: 4px; }
         .ui { display: none; }
         :host(.on) .ui { display: block; }
         .pilula { position: fixed; left: 12px; bottom: 12px; pointer-events: auto; padding: 8px 14px; border-radius: 999px;
@@ -312,13 +441,23 @@
       <div class="ui">
       <div class="caixa hover"></div>
       <div class="caixa sel">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((a) => `<div class="alca" data-a="${a}"></div>`).join('')}</div>
+      <div class="extras"></div>
+      <div class="guia gx"></div><div class="guia gy"></div>
+      ${'<div class="medida"><span></span></div>'.repeat(4)}
       <div class="painel">
         <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
-          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Ctrl+Z: desfazer · Delete: remover · H: espelhar · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Esc: soltar · Ctrl+Shift+E: desligar.</div>
+          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
           <div class="telas" title="Mudar a largura da tela. Cada largura guarda os seus próprios ajustes (ponto: tem ajustes guardados).">Tela <b class="agora"></b>
             ${tamanhosDeTela.map(([nome, w]) => `<button data-tela="${w}" title="${w}px">${nome}</button>`).join('')}<button data-tela="0" title="Volta ao tamanho da janela">Janela</button></div>
           <div class="info sel-info">Nenhum elemento escolhido.</div>
+          <div class="alinhar" title="Alinha a seleção (Shift+clique escolhe vários)">
+            <button data-alinhar="esquerda" title="Alinhar à esquerda">⇤</button><button data-alinhar="centro" title="Centralizar na horizontal">↔</button><button data-alinhar="direita" title="Alinhar à direita">⇥</button>
+            <button data-alinhar="topo" title="Alinhar em cima">⤒</button><button data-alinhar="meio" title="Centralizar na vertical">↕</button><button data-alinhar="base" title="Alinhar embaixo">⤓</button>
+            <button data-alinhar="distH" title="Distribuir na horizontal (3 ou mais)">⋯</button><button data-alinhar="distV" title="Distribuir na vertical (3 ou mais)">⋮</button>
+          </div>
+          <details class="estilo"><summary>Estilo</summary><div class="estilos"></div></details>
+          <details class="notas" open><summary class="nota-titulo">Nota</summary><textarea class="nota" placeholder="Um pedido livre para o agente (ex.: trocar esta foto)"></textarea></details>
           <h4>Elementos neste ponto</h4>
           <ul class="lista candidatos"></ul>
           <h4>Alterados (<span class="total">0</span>)</h4>
@@ -329,6 +468,8 @@
             <button data-acao="desfazer">Desfazer</button>
             <button data-acao="imagem" title="Escolher uma imagem de uma pasta e colocar na página">+ Imagem</button>
             <button data-acao="espelhar" title="H">Espelhar</button>
+            <button data-acao="texto" title="Duplo clique no elemento faz o mesmo">Editar texto</button>
+            <button data-acao="guias" title="Guias de alinhamento ao arrastar (Ctrl solta) e medidas até o elemento sob o mouse">Guias: sim</button>
             <button data-acao="remover" title="Delete">Remover</button>
             <button data-acao="restaurar">Restaurar este</button>
             <button data-acao="limpar">Limpar tudo</button>
@@ -351,23 +492,68 @@
       if (acao === 'copiar') copiar();
       if (acao === 'copiar-prints') copiar(true);
       if (acao === 'desfazer') voltar();
-      if (acao === 'restaurar' && selecionado) { restaurar(selecionado); atualizarPainel(); }
-      if (acao === 'remover') remover(selecionado);
-      if (acao === 'espelhar') espelhar(selecionado);
+      if (acao === 'restaurar' && selecionado) { selecao().forEach(restaurar); painelDe = undefined; atualizarPainel(); }
+      if (acao === 'remover') remover(selecao());
+      if (acao === 'espelhar') espelhar(selecao());
+      if (acao === 'texto') editarTexto(selecionado);
+      if (acao === 'guias') { guiasLigadas = !guiasLigadas; guardarPainel(); atualizarPainel(); }
+      const alinhamento = e.target.closest?.('[data-alinhar]')?.dataset.alinhar;
+      if (alinhamento) alinhar(alinhamento);
       if (acao === 'imagem') adicionarImagem();
-      if (acao === 'limpar') { [...alteracoes.keys()].forEach(restaurar); parados = []; desfazer.length = 0; atualizarPainel(); guardar(); }
+      if (acao === 'limpar') {
+        [...alteracoes.keys()].forEach(restaurar);
+        parados = [];
+        notaGeral = '';
+        // Tudo mesmo: os ajustes guardados das outras larguras de tela também.
+        guardado = { telas: {} };
+        desfazer.length = 0;
+        painelDe = undefined;
+        atualizarPainel();
+        guardar();
+      }
       if (acao === 'anim') alternarAnimacoes(e.target);
       const tela = e.target.closest?.('button[data-tela]');
       if (tela) mudarTela(Number(tela.dataset.tela) || null);
       const item = e.target.closest?.('li[data-i]');
       if (item) {
-        const lista = item.parentElement.classList.contains('alterados') ? [...alteracoes.keys()] : candidatos;
+        const lista = item.parentElement.classList.contains('alterados') ? alterados() : candidatos;
         selecionar(lista[Number(item.dataset.i)]);
         selecionado?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
     });
     caixaSel.addEventListener('pointerdown', (e) => {
       if (e.target.dataset?.a) iniciarArrasto(e, e.target.dataset.a);
+    });
+
+    // Estilo: cada campo muda a propriedade em toda a seleção; vazio volta ao valor da página.
+    raiz.querySelector('.estilos').addEventListener('change', (e) => {
+      const campo = e.target.closest('input[type=text][data-prop]');
+      if (!campo) return;
+      const p = campo.dataset.prop;
+      const valor = campo.value.trim();
+      const els = selecao();
+      guardarDesfazer(els);
+      for (const el of els) {
+        const s = estado(el);
+        if (!valor || valor === s.orig.estilos[p]) delete s.estilos[p]; else s.estilos[p] = valor;
+        aplicar(el);
+      }
+      painelDe = undefined;
+      atualizarPainel();
+    });
+    raiz.querySelector('.estilos').addEventListener('input', (e) => {
+      const cor = e.target.closest('input[type=color]');
+      if (!cor) return;
+      const campo = raiz.querySelector(`input[type=text][data-prop="${cor.dataset.cor}"]`);
+      campo.value = cor.value;
+      campo.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    // Nota: do elemento escolhido, ou da página quando nada está escolhido.
+    raiz.querySelector('.nota').addEventListener('input', (e) => {
+      if (selecionado) estado(selecionado).nota = e.target.value;
+      else notaGeral = e.target.value;
+      agendarGuardar();
+      atualizarListas();
     });
 
     // Painel arrastável pelo título; posição e estado ficam guardados neste site.
@@ -390,6 +576,7 @@
       if (salvo?.left) Object.assign(painel.style, { left: salvo.left, top: salvo.top, right: 'auto', bottom: 'auto' });
       painel.classList.toggle('min', !!salvo?.min);
       painel.classList.toggle('ajuda', !!salvo?.ajuda);
+      if (salvo?.guias === false) guiasLigadas = false;
     } catch { /* sem armazenamento: painel no lugar padrão */ }
     if (avisoPendente) avisar(avisoPendente);
     atualizarPilula();
@@ -400,7 +587,7 @@
     try {
       localStorage.setItem('ajusteVisualPainel', JSON.stringify({
         left: painel.style.left, top: painel.style.top,
-        min: painel.classList.contains('min'), ajuda: painel.classList.contains('ajuda'),
+        min: painel.classList.contains('min'), ajuda: painel.classList.contains('ajuda'), guias: guiasLigadas,
       }));
     } catch { /* sem armazenamento: só não lembra a posição */ }
   }
@@ -422,11 +609,52 @@
   }
 
   let ultimoHover = null;
+  let guiasLigadas = true;
   function laco() {
     if (!ligado) return;
-    posicionar(caixaHover, arrasto ? null : ultimoHover !== selecionado ? ultimoHover : null);
+    const sel = selecao();
+    posicionar(caixaHover, arrasto ? null : !sel.includes(ultimoHover) ? ultimoHover : null);
     posicionar(caixaSel, selecionado);
+    // Uma caixa tracejada para cada elemento a mais da seleção.
+    const caixas = raiz.querySelector('.extras');
+    while (caixas.children.length < extras.size) caixas.insertAdjacentHTML('beforeend', '<div class="caixa extra"></div>');
+    [...caixas.children].forEach((c, i) => posicionar(c, sel[i + 1] ?? null));
+    // Guias de alinhamento durante o arrasto.
+    const [gx, gy] = raiz.querySelectorAll('.guia');
+    gx.style.display = arrasto?.guiaX != null ? 'block' : 'none';
+    gy.style.display = arrasto?.guiaY != null ? 'block' : 'none';
+    if (arrasto?.guiaX != null) gx.style.left = `${arrasto.guiaX}px`;
+    if (arrasto?.guiaY != null) gy.style.top = `${arrasto.guiaY}px`;
+    // Medidas: distância do escolhido até o elemento sob o mouse.
+    const segs = guiasLigadas && !arrasto && selecionado && ultimoHover && !sel.includes(ultimoHover)
+      ? medidas(selecionado.getBoundingClientRect(), ultimoHover.getBoundingClientRect()) : [];
+    raiz.querySelectorAll('.medida').forEach((m, i) => {
+      const s = segs[i];
+      if (!s) { m.style.display = 'none'; return; }
+      Object.assign(m.style, { display: 'block', left: `${s.x}px`, top: `${s.y}px`, width: `${s.w}px`, height: `${s.h}px` });
+      m.firstChild.textContent = String(s.valor);
+    });
     requestAnimationFrame(laco);
+  }
+  /* Segmentos entre as bordas de A (escolhido) e B: o vão entre eles, ou, se um está sobre o outro,
+     a distância entre as bordas do mesmo lado. */
+  function medidas(a, b) {
+    const segs = [];
+    const linha = (de, ate, fixo, horizontal) => {
+      const [x1, x2] = [Math.min(de, ate), Math.max(de, ate)];
+      if (x2 - x1 < 1) return;
+      const valor = Math.round(x2 - x1);
+      segs.push(horizontal ? { x: x1, y: fixo, w: x2 - x1, h: 1, valor } : { x: fixo, y: x1, w: 1, h: x2 - x1, valor });
+    };
+    const meioY = Math.max(a.top, b.top) < Math.min(a.bottom, b.bottom) ? (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2 : a.top + a.height / 2;
+    const meioX = Math.max(a.left, b.left) < Math.min(a.right, b.right) ? (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2 : a.left + a.width / 2;
+    if (b.left >= a.right) linha(a.right, b.left, meioY, true);
+    else if (b.right <= a.left) linha(b.right, a.left, meioY, true);
+    else { linha(a.left, b.left, meioY, true); linha(a.right, b.right, meioY, true); }
+    if (b.top >= a.bottom) linha(a.bottom, b.top, meioX, false);
+    else if (b.bottom <= a.top) linha(b.bottom, a.top, meioX, false);
+    else { linha(a.top, b.top, meioX, false); linha(a.bottom, b.bottom, meioX, false); }
+    return segs.slice(0, 4);
   }
 
   /* Nome curto para o painel: arquivo da imagem, #id ou a primeira classe, mais um pedaço
@@ -440,15 +668,45 @@
     const t = textoCurto(el);
     return { nome, extra: t && !grande(el) ? t.slice(0, 28) : grande(el) ? 'bloco grande' : '' };
   }
+  const comNota = (el) => (alteracoes.get(el)?.nota ? ' 📝' : '');
+  const alterados = () => [...alteracoes.entries()].filter(([, s]) => mudou(s)).map(([el]) => el);
   const lista = (els) => els.map((el, i) => {
     const r = rotulo(el);
     const codigo = origemDe(el);
-    return `<li data-i="${i}" class="${el === selecionado ? 'on' : ''}" title="${html(descrever(el) + '\n' + seletor(el) + (codigo ? `\n${codigo}` : ''))}">${html(r.nome)}${r.extra ? ` <span class="g">· ${html(r.extra)}</span>` : ''}</li>`;
+    return `<li data-i="${i}" class="${el === selecionado || extras.has(el) ? 'on' : ''}" title="${html(descrever(el) + '\n' + seletor(el) + (codigo ? `\n${codigo}` : ''))}">${html(r.nome)}${r.extra ? ` <span class="g">· ${html(r.extra)}</span>` : ''}${comNota(el)}</li>`;
   }).join('');
 
+  // Elemento para o qual os campos de estilo e a nota foram preenchidos (só refaz quando muda).
+  let painelDe;
+  let notaGeral = '';
+  const hex = (cor) => {
+    const m = cor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    return m ? `#${m.slice(1, 4).map((n) => Number(n).toString(16).padStart(2, '0')).join('')}` : '#000000';
+  };
+  function atualizarCampos() {
+    if (painelDe === selecionado) return;
+    painelDe = selecionado;
+    const s = selecionado ? alteracoes.get(selecionado) : null;
+    const cs = selecionado ? getComputedStyle(selecionado) : null;
+    raiz.querySelector('.estilos').innerHTML = selecionado ? PROPRIEDADES.map(([p, nome]) => {
+      const valor = s?.estilos[p] ?? cs.getPropertyValue(p);
+      const cor = /color/.test(p) ? `<input type="color" data-cor="${p}" value="${hex(valor)}">` : '<span></span>';
+      return `<label title="${p}">${html(nome)}</label><input type="text" data-prop="${p}" class="${s?.estilos[p] != null ? 'mudou' : ''}" value="${html(valor)}">${cor}`;
+    }).join('') : '<small>Escolha um elemento.</small>';
+    raiz.querySelector('.nota').value = selecionado ? s?.nota ?? '' : notaGeral;
+    raiz.querySelector('.nota-titulo').textContent = selecionado ? 'Nota sobre este elemento' : 'Nota geral da página';
+  }
+  function atualizarListas() {
+    raiz.querySelector('.candidatos').innerHTML = lista(candidatos);
+    raiz.querySelector('.alterados').innerHTML = lista(alterados());
+    raiz.querySelector('.total').textContent = String([...alteracoes.values()].filter(mudou).length);
+  }
   function atualizarPainel() {
     if (!raiz) return;
     const info = raiz.querySelector('.sel-info');
+    const sel = selecao();
+    raiz.querySelector('.alinhar').classList.toggle('on', sel.length >= 2);
+    raiz.querySelector('[data-acao="guias"]').textContent = `Guias: ${guiasLigadas ? 'sim' : 'não'}`;
     if (selecionado) {
       const s = alteracoes.get(selecionado);
       const r = selecionado.getBoundingClientRect();
@@ -460,13 +718,13 @@
         (s?.removido ? ' · removido' : '') +
         (s && mudou(s) && !s.removido ? ` · moveu ${s.dx}, ${s.dy}px` + (s.rot ? ` · girou ${s.rot}°` : '') + (s.opacidade != null ? ` · opac. ${s.opacidade}` : '') : '') + '</small>' +
         (codigo ? `<small>${html(codigo.split(/[\\/]/).slice(-2).join('/'))}</small>` : '');
+      if (sel.length > 1) info.innerHTML += `<small>+ ${sel.length - 1} na seleção (Shift+clique põe ou tira)</small>`;
     } else info.textContent = 'Nenhum elemento escolhido.';
-    raiz.querySelector('.candidatos').innerHTML = lista(candidatos);
-    // Mostra só o que de fato mudou (escolher um elemento sem mexer não conta).
-    if (!arrasto) for (const [el, s] of alteracoes) if (!mudou(s)) restaurar(el);
-    const alterados = [...alteracoes.keys()];
-    raiz.querySelector('.alterados').innerHTML = lista(alterados);
-    raiz.querySelector('.total').textContent = String([...alteracoes.values()].filter(mudou).length);
+    // Mostra só o que de fato mudou (escolher um elemento sem mexer não conta). A seleção e o texto
+    // em edição ficam, mesmo sem mudança ainda (senão o meio de uma ação em grupo perderia elementos).
+    if (!arrasto) for (const [el, s] of alteracoes) if (!mudou(s) && el !== editando && !sel.includes(el)) restaurar(el);
+    atualizarListas();
+    atualizarCampos();
     atualizarTelas();
   }
   // Antes de a interface existir, o aviso espera e aparece quando ela for criada.
@@ -480,15 +738,46 @@
   }
 
   /* ---------- arrastar, redimensionar ---------- */
+  /* Linhas onde o elemento arrastado gruda: bordas e centros dos elementos visíveis por perto, do
+     contêiner e o centro da tela. Medidas uma vez no começo do arrasto. */
+  function linhasDeAlinhamento(grupo) {
+    const x = [innerWidth / 2], y = [];
+    const juntar = (r) => { x.push(r.left, r.left + r.width / 2, r.right); y.push(r.top, r.top + r.height / 2, r.bottom); };
+    const pai = selecionado.offsetParent ?? selecionado.parentElement;
+    if (pai) juntar(pai.getBoundingClientRect());
+    let vistos = 0;
+    for (const n of document.body.querySelectorAll('*')) {
+      if (vistos > 600) break;
+      if (n === host || grupo.some((g) => g === n || g.contains(n) || n.contains(g))) continue;
+      const r = n.getBoundingClientRect();
+      if (!r.width || !r.height || r.bottom < -200 || r.top > innerHeight + 200 || grande(n)) continue;
+      vistos++;
+      juntar(r);
+    }
+    return { x, y };
+  }
+  // O valor do elemento que fica mais perto de uma linha (até 5px) e quanto falta para encostar.
+  function grudar(valores, linhas) {
+    let melhor = null;
+    for (const v of valores) for (const l of linhas) {
+      const d = l - v;
+      if (Math.abs(d) <= 5 && (!melhor || Math.abs(d) < Math.abs(melhor.d))) melhor = { d, l };
+    }
+    return melhor;
+  }
   function iniciarArrasto(e, modo) {
     if (!selecionado) return;
     e.preventDefault();
     e.stopPropagation();
     const el = selecionado;
-    guardarDesfazer(el);
+    // Mover leva a seleção inteira; mudar o tamanho é só no escolhido.
+    const grupo = modo === 'mover' ? selecao() : [el];
+    guardarDesfazer(grupo);
     const s = estado(el);
     const r = el.getBoundingClientRect();
-    arrasto = { el, modo, x: e.clientX, y: e.clientY, dx: s.dx, dy: s.dy,
+    arrasto = { el, modo, x: e.clientX, y: e.clientY, dx: s.dx, dy: s.dy, r0: r,
+      grupo: grupo.map((g) => ({ el: g, dx: estado(g).dx, dy: estado(g).dy })),
+      linhas: modo === 'mover' && guiasLigadas ? linhasDeAlinhamento(grupo) : null,
       largura: s.largura ?? s.orig.larguraCss, altura: s.altura ?? (el.offsetHeight || r.height), proporcao: r.height / r.width };
     try { caixaSel.setPointerCapture(e.pointerId); } catch { /* segue sem captura */ }
   }
@@ -496,25 +785,40 @@
     if (!ligado) return;
     if (arrasto) {
       const s = estado(arrasto.el);
-      const mx = Math.round(e.clientX - arrasto.x), my = Math.round(e.clientY - arrasto.y);
+      let mx = Math.round(e.clientX - arrasto.x), my = Math.round(e.clientY - arrasto.y);
       const a = arrasto.modo;
-      if (a === 'mover') { s.dx = arrasto.dx + mx; s.dy = arrasto.dy + my; }
-      else {
-        // Lado puxado cresce; o lado oposto fica parado (compensa com o deslocamento).
-        const horizontal = a.includes('e') ? mx : a.includes('w') ? -mx : 0;
-        const vertical = a.includes('s') ? my : a.includes('n') ? -my : 0;
-        let largura = arrasto.largura + horizontal;
-        let altura = arrasto.altura + vertical;
-        const canto = a.length === 2;
-        // Imagem pelo canto mantém a proporção (Shift solta).
-        if (canto && arrasto.el.tagName === 'IMG' && !e.shiftKey) altura = largura * arrasto.proporcao;
-        largura = Math.max(4, Math.round(largura));
-        altura = Math.max(4, Math.round(altura));
-        if (horizontal) s.largura = largura;
-        if (vertical || (canto && arrasto.el.tagName === 'IMG')) s.altura = altura;
-        if (a.includes('w')) s.dx = arrasto.dx + (arrasto.largura - largura);
-        if (a.includes('n')) s.dy = arrasto.dy + (arrasto.altura - altura);
+      if (a === 'mover') {
+        // Gruda nas guias (Ctrl segurado move livre).
+        arrasto.guiaX = arrasto.guiaY = null;
+        if (arrasto.linhas && !e.ctrlKey) {
+          const r = arrasto.r0;
+          const gx = grudar([r.left + mx, r.left + r.width / 2 + mx, r.right + mx], arrasto.linhas.x);
+          const gy = grudar([r.top + my, r.top + r.height / 2 + my, r.bottom + my], arrasto.linhas.y);
+          if (gx) { mx += Math.round(gx.d); arrasto.guiaX = gx.l; }
+          if (gy) { my += Math.round(gy.d); arrasto.guiaY = gy.l; }
+        }
+        for (const g of arrasto.grupo) {
+          const sg = estado(g.el);
+          sg.dx = g.dx + mx;
+          sg.dy = g.dy + my;
+          aplicar(g.el);
+        }
+        return;
       }
+      // Lado puxado cresce; o lado oposto fica parado (compensa com o deslocamento).
+      const horizontal = a.includes('e') ? mx : a.includes('w') ? -mx : 0;
+      const vertical = a.includes('s') ? my : a.includes('n') ? -my : 0;
+      let largura = arrasto.largura + horizontal;
+      let altura = arrasto.altura + vertical;
+      const canto = a.length === 2;
+      // Imagem pelo canto mantém a proporção (Shift solta).
+      if (canto && arrasto.el.tagName === 'IMG' && !e.shiftKey) altura = largura * arrasto.proporcao;
+      largura = Math.max(4, Math.round(largura));
+      altura = Math.max(4, Math.round(altura));
+      if (horizontal) s.largura = largura;
+      if (vertical || (canto && arrasto.el.tagName === 'IMG')) s.altura = altura;
+      if (a.includes('w')) s.dx = arrasto.dx + (arrasto.largura - largura);
+      if (a.includes('n')) s.dy = arrasto.dy + (arrasto.altura - altura);
       aplicar(arrasto.el);
       return;
     }
@@ -528,21 +832,32 @@
     atualizarPainel();
   }, true);
 
-  /* Bloqueia cliques da página enquanto o editor está ligado e escolhe o elemento. */
+  /* Bloqueia cliques da página enquanto o editor está ligado e escolhe o elemento.
+     O texto em edição continua recebendo cliques (para posicionar o cursor). */
   let altAnterior = null;
+  const noTextoEmEdicao = (e) => editando && e.composedPath().includes(editando);
   const bloquear = (e) => {
-    if (!ligado || dentroDaUi(e)) return;
+    if (!ligado || dentroDaUi(e) || noTextoEmEdicao(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   };
+  /* Duplo clique no elemento escolhido edita o texto (registrado antes do bloqueio, que corta os outros).
+     O arrasto prende o ponteiro na caixa de seleção, então o evento chega pela interface: só o painel
+     e o botão ficam de fora. */
+  window.addEventListener('dblclick', (e) => {
+    const caminho = e.composedPath();
+    if (!ligado || caminho.includes(painel) || caminho.includes(raiz?.querySelector('.pilula')) || noTextoEmEdicao(e)) return;
+    if (!selecionado || !dentro(selecionado, e.clientX, e.clientY)) return;
+    editarTexto(selecionado);
+  }, true);
   ['click', 'dblclick', 'mousedown', 'mouseup', 'pointerup', 'contextmenu', 'auxclick'].forEach((t) => window.addEventListener(t, bloquear, true));
   window.addEventListener('pointerdown', (e) => {
-    if (!ligado || dentroDaUi(e)) return;
+    if (!ligado || dentroDaUi(e) || noTextoEmEdicao(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    // Clicar dentro do elemento já escolhido arrasta ele mesmo, mesmo que esteja atrás de outro
+    // Clicar dentro da seleção arrasta ela, mesmo que esteja atrás de outro elemento
     // (ex.: gravura de fundo escolhida pela lista ou com Alt+clique).
-    if (!e.altKey && selecionado && !grande(selecionado) && dentro(selecionado, e.clientX, e.clientY)) {
+    if (!e.altKey && !e.shiftKey && selecao().some((el) => !grande(el) && dentro(el, e.clientX, e.clientY))) {
       iniciarArrasto(e, 'mover');
       return;
     }
@@ -556,6 +871,8 @@
       altAnterior = { x: e.clientX, y: e.clientY, i };
       escolhido = fundo[i];
     }
+    // Shift+clique: põe ou tira da seleção, sem arrastar.
+    if (e.shiftKey) { if (escolhido) alternarNaSelecao(escolhido); return; }
     selecionar(escolhido ?? null);
     if (escolhido) iniciarArrasto(e, 'mover');
   }, true);
@@ -564,35 +881,46 @@
   window.addEventListener('wheel', (e) => {
     if (!ligado || !selecionado || !(e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
-    const el = selecionado;
-    guardarDesfazer(el);
-    const s = estado(el);
+    const els = selecao();
+    guardarDesfazer(els);
     const passo = (e.deltaY || e.deltaX) > 0 ? -1 : 1;
-    if (e.ctrlKey) {
-      const atual = s.largura ?? s.orig.larguraCss;
-      s.largura = Math.max(4, Math.round(atual * (1 + passo * 0.05)));
-    } else if (e.shiftKey) s.rot += passo * 2;
-    else if (e.altKey) s.opacidade = Math.min(1, Math.max(0, Math.round(((s.opacidade ?? s.orig.opacidade) + passo * 0.02) * 100) / 100));
-    aplicar(el);
+    for (const el of els) {
+      const s = estado(el);
+      if (e.ctrlKey) {
+        const atual = s.largura ?? s.orig.larguraCss;
+        s.largura = Math.max(4, Math.round(atual * (1 + passo * 0.05)));
+      } else if (e.shiftKey) s.rot += passo * 2;
+      else if (e.altKey) s.opacidade = Math.min(1, Math.max(0, Math.round(((s.opacidade ?? s.orig.opacidade) + passo * 0.02) * 100) / 100));
+      aplicar(el);
+    }
   }, { capture: true, passive: false });
 
   function voltar() {
     const passo = desfazer.pop();
     if (!passo) return;
-    Object.assign(estado(passo.el), passo.antes);
-    aplicar(passo.el);
-    selecionar(passo.el);
+    for (const { el, antes } of passo) {
+      Object.assign(estado(el), antes);
+      aplicar(el);
+    }
+    selecionar(passo[0].el);
+    for (const { el } of passo.slice(1)) if (el.isConnected) extras.add(el);
+    painelDe = undefined;
+    atualizarPainel();
   }
 
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.shiftKey && e.code === 'KeyE') { e.preventDefault(); alternar(); return; }
     if (!ligado) return;
+    // Texto em edição: Enter ou Esc terminam (Shift+Enter quebra a linha).
+    if (editando && (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey))) { e.preventDefault(); editando.blur(); return; }
     const alvo = e.composedPath()[0];
+    // Num campo do painel, Esc só sai do campo (o próximo Esc solta o elemento).
+    if (e.key === 'Escape' && alvo instanceof HTMLElement && /INPUT|TEXTAREA/.test(alvo.tagName) && raiz?.contains(alvo)) { alvo.blur(); return; }
     if (alvo instanceof HTMLElement && (alvo.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(alvo.tagName))) return;
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); voltar(); return; }
     if (e.key === 'Escape') { selecionar(null); return; }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selecionado) { e.preventDefault(); remover(selecionado); return; }
-    if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && selecionado) { e.preventDefault(); espelhar(selecionado); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selecionado) { e.preventDefault(); remover(selecao()); return; }
+    if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && selecionado) { e.preventDefault(); espelhar(selecao()); return; }
     if ((e.key === '[' || e.key === ']') && candidatos.length) {
       const i = candidatos.indexOf(selecionado);
       selecionar(candidatos[(i + (e.key === ']' ? -1 : 1) + candidatos.length) % candidatos.length]);
@@ -603,11 +931,14 @@
     if (selecionado && setas[e.key]) {
       e.preventDefault();
       const passo = e.shiftKey ? 10 : 1;
-      guardarDesfazer(selecionado);
-      const s = estado(selecionado);
-      s.dx += setas[e.key][0] * passo;
-      s.dy += setas[e.key][1] * passo;
-      aplicar(selecionado);
+      const els = selecao();
+      guardarDesfazer(els);
+      for (const el of els) {
+        const s = estado(el);
+        s.dx += setas[e.key][0] * passo;
+        s.dy += setas[e.key][1] * passo;
+        aplicar(el);
+      }
     }
   }, true);
 
@@ -659,15 +990,20 @@
     const registros = [...registrosAtuais(), ...parados];
     if (registros.length) guardado.telas[telaAtual] = registros;
     else delete guardado.telas[telaAtual];
+    guardado.nota = notaGeral;
     try {
-      if (Object.keys(guardado.telas).length) localStorage.setItem(chaveGuardada(), JSON.stringify(guardado));
+      if (Object.keys(guardado.telas).length || notaGeral) localStorage.setItem(chaveGuardada(), JSON.stringify(guardado));
       else localStorage.removeItem(chaveGuardada());
     } catch { /* sem armazenamento: só não sobrevive ao recarregar */ }
     atualizarPilula();
   }
   function registro(el, s) {
-    const { estiloInline, ...orig } = s.orig;
-    return { orig, valores: copia(s), novo: s.novo, codigo: origemDe(el), final: s.removido ? null : medir(el) };
+    const { estiloInline, inline, html, ...orig } = s.orig;
+    const cs = getComputedStyle(el);
+    return {
+      orig, valores: copia(s), novo: s.novo, codigo: origemDe(el), final: s.removido ? null : medir(el),
+      estilosFinais: Object.fromEntries(Object.keys(s.estilos).map((p) => [p, cs.getPropertyValue(p)])),
+    };
   }
   // Imagem nova que depois foi removida não conta.
   const registrosAtuais = () => [...alteracoes.entries()].filter(([, s]) => mudou(s) && !(s.novo && s.removido)).map(([el, s]) => registro(el, s));
@@ -696,6 +1032,11 @@
         votos.push(Math.abs(o - r.orig.opacidade) < 0.01 ? 'antes' : Math.abs(o - v.opacidade) < 0.01 ? 'depois' : 'diferente');
       }
       if (v.espelhado) votos.push(sinalHorizontal(cs) === r.orig.sinal ? 'antes' : 'depois');
+      if (v.texto != null) votos.push(el.innerText === v.texto ? 'depois' : el.innerText === r.orig.texto ? 'antes' : 'diferente');
+      for (const p of Object.keys(v.estilos ?? {})) {
+        const agora = cs.getPropertyValue(p);
+        votos.push(agora === r.estilosFinais?.[p] ? 'depois' : agora === r.orig.estilos?.[p] ? 'antes' : 'diferente');
+      }
     }
     if (votos.every((x) => x === 'antes')) return 'antes';
     return votos.every((x) => x === 'depois') ? 'depois' : 'diferente';
@@ -764,6 +1105,8 @@
     // No começo da página a largura ainda pode não ser a final; vale a de agora.
     telaAtual = innerWidth;
     guardado = lerGuardado();
+    notaGeral = guardado.nota ?? '';
+    painelDe = undefined;
     const registros = guardado.telas[telaAtual] ?? [];
     if (!registros.length) { carregado = true; atualizarPilula(); return; }
     const conta = await reaplicar(registros);
@@ -833,6 +1176,7 @@
     if (s.altura != null) css.push(`height: ${s.altura}px`);
     if (s.opacidade != null) css.push(`opacity: ${s.opacidade}`);
     if (s.espelhado) css.push('scale: -1 1');
+    for (const [p, valor] of Object.entries(s.estilos ?? {})) css.push(`${p}: ${valor}`);
     if (!css.length) return [];
     const linhas = [`   CSS final: ${css.join('; ')}`];
     if (o.rotacaoTransform && s.rot) linhas.push(`   (a página também gira este elemento ${o.rotacaoTransform}° pelo transform; na tela ele fica em ${o.rotacaoTransform + o.rotate + s.rot}°)`);
@@ -865,6 +1209,7 @@
         ? `Há ajustes em ${larguras.length} larguras de tela (${larguras.map((w) => `${w}px`).join(', ')}). Aplique cada grupo só na sua faixa de largura (media query); os valores são relativos à posição original naquela largura.`
         : 'Aplique no código-fonte que gera estes elementos. Os valores são relativos à posição original, nesta largura de tela.',
       ...prints,
+      ...(notaGeral ? [`Nota geral: ${notaGeral.replace(/\s*\n\s*/g, ' / ')}`] : []),
       '',
     ];
     const escreverItem = ({ orig: o, valores: s, novo, codigo, parado }, i) => {
@@ -901,7 +1246,10 @@
       if (s.rot) partes.push(`   girar: ${s.rot > 0 ? '+' : ''}${s.rot}° a mais que a rotação atual (${s.rot > 0 ? 'sentido horário' : 'anti-horário'})`);
       if (s.opacidade != null) partes.push(`   opacidade: ${o.opacidade} → ${s.opacidade}`);
       if (s.espelhado) partes.push('   espelhar: inverter na horizontal');
+      if (s.texto != null) partes.push(`   texto: ${JSON.stringify(o.texto ?? '')} → ${JSON.stringify(s.texto)}`);
+      for (const [p, valor] of Object.entries(s.estilos ?? {})) partes.push(`   ${nomeProp[p] ?? p}: ${o.estilos?.[p] ?? '?'} → ${valor}`);
       partes.push(...cssFinal(o, s));
+      if (s.nota) partes.push(`   nota: ${s.nota.replace(/\s*\n\s*/g, ' / ')}`);
       // Removido vale mais que qualquer outro ajuste no mesmo elemento.
       if (s.removido) partes.splice(0, partes.length, '   remover: tirar este elemento da página');
       linhas.push(
@@ -938,12 +1286,16 @@
     const marcas = document.createElement('div');
     try {
       vivos.forEach(([el, s]) => {
+        if (s.texto != null && s.orig.html != null) el.innerHTML = s.orig.html;
         if (s.novo) el.style.setProperty('display', 'none', 'important');
         else if (s.orig.estiloInline == null) el.removeAttribute('style');
         else el.setAttribute('style', s.orig.estiloInline);
       });
       const antes = await window.__ajusteFoto(`${marca}-antes.jpg`);
-      vivos.forEach(([el], i) => { if (estilos[i] == null) el.removeAttribute('style'); else el.setAttribute('style', estilos[i]); });
+      vivos.forEach(([el, s], i) => {
+        if (estilos[i] == null) el.removeAttribute('style'); else el.setAttribute('style', estilos[i]);
+        if (s.texto != null) el.innerText = s.texto;
+      });
       marcas.style.cssText = 'all:initial;position:absolute;left:0;top:0;z-index:2147483646;pointer-events:none;';
       for (const [el, s] of vivos) {
         n++;
