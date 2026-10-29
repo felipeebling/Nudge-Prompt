@@ -113,7 +113,7 @@
     ['color', 'cor do texto'], ['background-color', 'cor de fundo'], ['font-size', 'tamanho da fonte'],
     ['font-weight', 'peso da fonte'], ['line-height', 'altura da linha'], ['letter-spacing', 'espaço entre letras'],
     ['padding', 'espaço interno (padding)'], ['margin', 'margem (margin)'], ['border-radius', 'arredondamento'],
-    ['z-index', 'camada (z-index)'],
+    ['z-index', 'camada (z-index)'], ['position', 'posicionamento (position)'],
   ];
   const nomeProp = Object.fromEntries(PROPRIEDADES);
   function estado(el) {
@@ -148,7 +148,7 @@
   }
   const copia = (s) => ({
     dx: s.dx, dy: s.dy, rot: s.rot, largura: s.largura, altura: s.altura, opacidade: s.opacidade, removido: s.removido,
-    espelhado: s.espelhado, texto: s.texto, estilos: { ...s.estilos }, nota: s.nota,
+    espelhado: s.espelhado, texto: s.texto, estilos: { ...s.estilos }, nota: s.nota, porque: s.porque,
   });
   // Um passo de desfazer pode ter vários elementos (ex.: mover a seleção inteira).
   function guardarDesfazer(els) {
@@ -384,6 +384,78 @@
     }
   }
 
+  /* "Para frente" / "Para trás": passa o elemento por cima (ou por baixo) do próximo elemento que se
+     sobrepõe a ele. Muitas vezes não adianta mudar a camada do próprio elemento, porque ele está dentro
+     de um bloco que fica inteiro atrás do outro (cada bloco com camada própria é um "andar" separado).
+     Então a camada vai no ramo certo: o ancestral dele que é irmão do ramo do outro elemento. */
+  const camadaDe = (el) => { const z = getComputedStyle(el).zIndex; return z === 'auto' ? 0 : num(z); };
+  // Vizinho mais próximo por cima e por baixo, olhando vários pontos do elemento.
+  function vizinhosDeCamada(el) {
+    const r = el.getBoundingClientRect();
+    const antes = el.style.getPropertyValue('pointer-events');
+    const prioridade = el.style.getPropertyPriority('pointer-events');
+    // Gravuras de fundo costumam ter pointer-events: none e não apareceriam no teste de clique.
+    el.style.setProperty('pointer-events', 'auto', 'important');
+    const votos = { acima: new Map(), abaixo: new Map() };
+    const contar = (mapa, n) => n && mapa.set(n, (mapa.get(n) ?? 0) + 1);
+    try {
+      for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
+        const x = r.left + (r.width * i) / 6, y = r.top + (r.height * j) / 6;
+        if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+        const pilha = document.elementsFromPoint(x, y)
+          .filter((n) => n !== host && n !== document.documentElement && n !== document.body && !n.contains(el) && !el.contains(n));
+        const todos = document.elementsFromPoint(x, y);
+        const k = todos.indexOf(el);
+        if (k < 0) continue;
+        const acima = pilha.filter((n) => todos.indexOf(n) < k);
+        const abaixo = pilha.filter((n) => todos.indexOf(n) > k);
+        contar(votos.acima, acima[acima.length - 1]);
+        contar(votos.abaixo, abaixo[0]);
+      }
+    } finally {
+      el.style.setProperty('pointer-events', antes, prioridade);
+    }
+    const mais = (mapa) => [...mapa.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    return { acima: mais(votos.acima), abaixo: mais(votos.abaixo) };
+  }
+  // Os dois ramos que se encontram no ancestral comum: o do elemento e o do outro.
+  function ramos(el, outro) {
+    let a = el;
+    while (a.parentElement && !a.parentElement.contains(outro)) a = a.parentElement;
+    const comum = a.parentElement;
+    let b = outro;
+    while (b.parentElement && b.parentElement !== comum) b = b.parentElement;
+    return [a, b];
+  }
+  function mudarCamada(para) {
+    const el = selecionado;
+    if (!el) return;
+    const viz = vizinhosDeCamada(el);
+    const outro = para === 'frente' ? viz.acima : viz.abaixo;
+    if (!outro) { avisar(para === 'frente' ? 'Já está na frente de tudo o que se sobrepõe a ele.' : 'Já está atrás de tudo o que se sobrepõe a ele.'); return; }
+    const [ramo, ramoOutro] = ramos(el, outro);
+    const antes = medir(el);
+    guardarDesfazer(ramo);
+    const s = estado(ramo);
+    const z = para === 'frente' ? camadaDe(ramoOutro) + 1 : camadaDe(ramoOutro) - 1;
+    s.estilos['z-index'] = String(z);
+    // z-index só vale em elemento posicionado; relative não tira o elemento do lugar.
+    if (getComputedStyle(ramo).position === 'static') s.estilos.position = 'relative';
+    s.porque = `${para === 'frente' ? 'trazer para a frente' : 'mandar para trás'} de ${descrever(ramoOutro)}` +
+      (ramo !== el ? `, para que ${descrever(el)} (que está dentro deste) fique ${para === 'frente' ? 'na frente' : 'atrás'}` : '');
+    aplicar(ramo);
+    // Se o position: relative mexeu no layout (algo dentro dele se posicionava por outro ancestral), desfaz.
+    if (!perto(antes, medir(el))) {
+      voltar();
+      selecionar(el);
+      avisar(`Não deu sem tirar coisas do lugar: o bloco ${descrever(ramo)} precisaria mudar de posicionamento. Deixe uma nota para o agente.`);
+      return;
+    }
+    painelDe = undefined;
+    selecionar(el);
+    avisar(`${para === 'frente' ? 'Na frente' : 'Atrás'} de ${rotulo(ramoOutro).nome}` + (ramo !== el ? ` (camada aplicada no bloco ${rotulo(ramo).nome}, que contém o escolhido)` : '') + '.');
+  }
+
   /* ---------- interface ---------- */
   function criarUi() {
     host = document.createElement('div');
@@ -469,7 +541,7 @@
       <div class="painel">
         <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
-          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
+          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · Para frente / Para trás (Ctrl+] / Ctrl+[): passa por cima ou por baixo do elemento que se sobrepõe · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
           <div class="telas" title="Mudar a largura da tela. Cada largura guarda os seus próprios ajustes (ponto: tem ajustes guardados).">Tela <b class="agora"></b>
             ${tamanhosDeTela.map(([nome, w]) => `<button data-tela="${w}" title="${w}px">${nome}</button>`).join('')}<button data-tela="0" title="Volta ao tamanho da janela">Janela</button></div>
           <div class="info sel-info">Nenhum elemento escolhido.</div>
@@ -490,6 +562,8 @@
             <button data-acao="desfazer">Desfazer</button>
             <button data-acao="imagem" title="Escolher uma imagem de uma pasta e colocar na página">+ Imagem</button>
             <button data-acao="espelhar" title="H">Espelhar</button>
+            <button data-acao="frente" title="Passa por cima do próximo elemento que se sobrepõe a ele (Ctrl+])">Para frente</button>
+            <button data-acao="tras" title="Passa por baixo do próximo elemento que se sobrepõe a ele (Ctrl+[)">Para trás</button>
             <button data-acao="texto" title="Duplo clique no elemento faz o mesmo">Editar texto</button>
             <button data-acao="guias" title="Guias de alinhamento ao arrastar (Ctrl solta) e medidas até o elemento sob o mouse">Guias: sim</button>
             <button data-acao="remover" title="Delete">Remover</button>
@@ -518,6 +592,7 @@
       if (acao === 'remover') remover(selecao());
       if (acao === 'espelhar') espelhar(selecao());
       if (acao === 'texto') editarTexto(selecionado);
+      if (acao === 'frente' || acao === 'tras') mudarCamada(acao === 'frente' ? 'frente' : 'tras');
       if (acao === 'guias') { guiasLigadas = !guiasLigadas; guardarPainel(); atualizarPainel(); }
       const alinhamento = e.target.closest?.('[data-alinhar]')?.dataset.alinhar;
       if (alinhamento) alinhar(alinhamento);
@@ -957,6 +1032,7 @@
     if (e.key === 'Escape') { selecionar(null); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selecionado) { e.preventDefault(); remover(selecao()); return; }
     if (e.key.toLowerCase() === 'h' && !e.ctrlKey && !e.altKey && selecionado) { e.preventDefault(); espelhar(selecao()); return; }
+    if ((e.key === '[' || e.key === ']') && e.ctrlKey && selecionado) { e.preventDefault(); mudarCamada(e.key === ']' ? 'frente' : 'tras'); return; }
     if ((e.key === '[' || e.key === ']') && candidatos.length) {
       const i = candidatos.indexOf(selecionado);
       selecionar(candidatos[(i + (e.key === ']' ? -1 : 1) + candidatos.length) % candidatos.length]);
@@ -1292,6 +1368,7 @@
       if (s.espelhado) partes.push('   espelhar: inverter na horizontal');
       if (s.texto != null) partes.push(`   texto: ${JSON.stringify(o.texto ?? '')} → ${JSON.stringify(s.texto)}`);
       for (const [p, valor] of Object.entries(s.estilos ?? {})) partes.push(`   ${nomeProp[p] ?? p}: ${o.estilos?.[p] ?? '?'} → ${valor}`);
+      if (s.porque && s.estilos?.['z-index'] != null) partes.push(`   camada: ${s.porque}`);
       partes.push(...cssFinal(o, s));
       if (s.nota) partes.push(`   nota: ${s.nota.replace(/\s*\n\s*/g, ' / ')}`);
       // Removido vale mais que qualquer outro ajuste no mesmo elemento.

@@ -206,6 +206,21 @@ await ligar();
 conferir('"Limpar tudo" limpa também as outras larguras', !texto.includes('=== Tela de 390px'), texto);
 conferir('a nota geral volta depois de recarregar', (await pagina.locator('[data-ajuste-visual] .nota').inputValue()) === 'Deixar a página mais clara');
 
+/* ---------- camadas: para frente / para trás ---------- */
+await botao('limpar').click();
+await pagina.keyboard.press('Escape');
+await pagina.mouse.click(580, 545);
+const zFundo = () => pagina.locator('.fundo-artes').evaluate((el) => getComputedStyle(el).zIndex);
+await botao('frente').click();
+conferir('"Para frente" sobe a camada do bloco que contém a gravura', (await zFundo()) === '2', await zFundo());
+conferir('a gravura continua no mesmo lugar', igual(await caixa('.arte-c'), { x: 500, y: 520 }), JSON.stringify(await caixa('.arte-c')));
+texto = await relatorio();
+conferir('o texto explica a camada', texto.includes('camada: trazer para a frente de section.faixa, para que img.arte.arte-c') && texto.includes('z-index: 2'), texto);
+await botao('frente').click();
+conferir('na frente de tudo, avisa e não muda', (await aviso()).includes('Já está na frente') && (await zFundo()) === '2', await aviso());
+await pagina.keyboard.press('Control+BracketLeft');
+conferir('Ctrl+[ manda para trás', (await zFundo()) === '0', await zFundo());
+
 await telaBotao(0).click();
 await pagina.waitForTimeout(900);
 conferir('botão Janela tira a largura emulada', await pagina.evaluate(() => innerWidth) !== 1280);

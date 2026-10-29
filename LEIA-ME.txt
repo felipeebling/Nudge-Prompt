@@ -51,6 +51,12 @@ USAR (na janela que abrir)
                          meio da tela, e já pode ser arrastada, redimensionada e girada.
                          No texto sai como "ADICIONAR imagem nova", com o caminho do
                          arquivo, onde colocar, posição e tamanho finais.
+  Para frente / trás ... (botões do painel, ou Ctrl+] e Ctrl+[) passa o elemento por
+                         cima ou por baixo do próximo elemento que se sobrepõe a ele.
+                         Se ele estiver dentro de um bloco que fica inteiro atrás do outro
+                         (caso comum de gravuras de fundo), a camada vai nesse bloco; o
+                         painel e o texto dizem qual. Se para isso algo sairia do lugar,
+                         não aplica e avisa.
   H .................... espelha na horizontal (botão "Espelhar")
   Delete ............... remove (botão "Remover" faz o mesmo);
                          no texto sai como "remover: tirar este elemento da página"
