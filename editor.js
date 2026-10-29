@@ -2,8 +2,18 @@
    Ctrl+Shift+E liga/desliga. Clique para escolher um elemento e arraste para mover.
    As mudanças são só na tela; "Copiar alterações" gera um texto para um agente aplicar no código. */
 (() => {
-  if (window.top !== window || window.__ajusteVisual) return;
+  /* Moldura de tela (Celular, Tablet, Notebook): a página abre num quadro com a largura escolhida
+     dentro de /__ajuste-tela, e o painel fica na moldura, ao lado do quadro. O editor roda no quadro. */
+  const ENDERECO_MOLDURA = '/__ajuste-tela';
+  if (window.top === window && location.pathname === ENDERECO_MOLDURA) return;
+  const moldura = window.top !== window && (() => {
+    try { return window.parent === window.top && window.parent.location.pathname === ENDERECO_MOLDURA; } catch { return false; }
+  })();
+  if ((window.top !== window && !moldura) || window.__ajusteVisual) return;
   window.__ajusteVisual = true;
+  // Onde ficam o painel e o botão: na moldura, quando há uma; senão, na própria página.
+  const janelaUi = moldura ? window.parent : window;
+  const docUi = janelaUi.document;
 
   const alteracoes = new Map(); // elemento -> estado
   const desfazer = [];
@@ -13,7 +23,9 @@
   let candidatos = [];
   let arrasto = null;
   let animacoesParadas = false;
-  let host, raiz, caixaHover, caixaSel, painel, estiloAnim;
+  // host: as caixas de seleção, na página. hostPainel: o painel e o botão (o mesmo host fora da moldura).
+  // raiz procura nos dois, para o resto do código não precisar saber onde cada parte está.
+  let host, hostPainel, raiz, caixaHover, caixaSel, painel, estiloAnim;
 
   /* ---------- descrição dos elementos ---------- */
   const nomeArquivo = (url) => {
@@ -458,11 +470,27 @@
 
   /* ---------- interface ---------- */
   function criarUi() {
-    host = document.createElement('div');
-    host.setAttribute('data-ajuste-visual', '');
-    host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
-    raiz = host.attachShadow({ mode: 'open' });
-    raiz.innerHTML = `
+    const novoHost = (doc) => {
+      const h = doc.createElement('div');
+      h.setAttribute('data-ajuste-visual', '');
+      h.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+      return h;
+    };
+    host = novoHost(document);
+    const raizes = [host.attachShadow({ mode: 'open' })];
+    if (moldura) {
+      // Um painel de um quadro anterior (a página recarregou) sai antes de entrar o novo.
+      docUi.querySelectorAll('[data-ajuste-visual]').forEach((h) => h.remove());
+      hostPainel = novoHost(docUi);
+      raizes.push(hostPainel.attachShadow({ mode: 'open' }));
+    } else hostPainel = host;
+    raiz = {
+      querySelector: (s) => raizes.map((r) => r.querySelector(s)).find(Boolean) ?? null,
+      querySelectorAll: (s) => raizes.flatMap((r) => [...r.querySelectorAll(s)]),
+      addEventListener: (...args) => raizes.forEach((r) => r.addEventListener(...args)),
+      contains: (n) => raizes.some((r) => r.contains(n)),
+    };
+    const estilo = `
       <style>
         :host { all: initial; }
         * { box-sizing: border-box; font: 12px/1.4 system-ui, sans-serif; }
@@ -530,15 +558,18 @@
         .pilula { position: fixed; left: 12px; bottom: 12px; pointer-events: auto; padding: 8px 14px; border-radius: 999px;
           background: #1d1d1f; color: #fff; font-weight: 600; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
         :host(.on) .pilula { background: #ff5a1f; }
-      </style>
-      <button class="pilula" data-acao="alternar" title="Ctrl+Shift+E">✎ Ajuste visual</button>
-      <div class="ui">
+        /* Na moldura de tela, o painel ocupa a coluna da direita, ao lado do quadro. */
+        .painel.lado { top: 12px; bottom: 12px; right: 12px; left: auto; max-height: none; }
+      </style>`;
+    const pilula = '<button class="pilula" data-acao="alternar" title="Ctrl+Shift+E">✎ Ajuste visual</button>';
+    const caixas = `
       <div class="caixa hover"></div>
       <div class="caixa sel">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((a) => `<div class="alca" data-a="${a}"></div>`).join('')}</div>
       <div class="extras"></div>
       <div class="guia gx"></div><div class="guia gy"></div>
-      ${'<div class="medida"><span></span></div>'.repeat(4)}
-      <div class="painel">
+      ${'<div class="medida"><span></span></div>'.repeat(4)}`;
+    const htmlPainel = `
+      <div class="painel${moldura ? ' lado' : ''}">
         <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
           <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · Para frente / Para trás (Ctrl+] / Ctrl+[): passa por cima ou por baixo do elemento que se sobrepõe · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
@@ -573,8 +604,14 @@
           </div>
           <div class="aviso"></div>
         </div>
-      </div>
       </div>`;
+    if (moldura) {
+      raizes[0].innerHTML = `${estilo}<div class="ui">${caixas}</div>`;
+      raizes[1].innerHTML = `${estilo}${pilula}<div class="ui">${htmlPainel}</div>`;
+      docUi.documentElement.appendChild(hostPainel);
+      // O quadro vai embora (recarregou ou trocou de página): o painel dele sai junto.
+      addEventListener('pagehide', () => hostPainel.remove());
+    } else raizes[0].innerHTML = `${estilo}${pilula}<div class="ui">${caixas}${htmlPainel}</div>`;
     document.documentElement.appendChild(host);
     caixaHover = raiz.querySelector('.hover');
     caixaSel = raiz.querySelector('.sel');
@@ -660,23 +697,30 @@
       const r = painel.getBoundingClientRect();
       const inicio = { x: e.clientX - r.left, y: e.clientY - r.top };
       const mover = (ev) => {
-        const left = Math.min(Math.max(0, ev.clientX - inicio.x), innerWidth - 60);
-        const top = Math.min(Math.max(0, ev.clientY - inicio.y), innerHeight - 30);
+        const left = Math.min(Math.max(0, ev.clientX - inicio.x), janelaUi.innerWidth - 60);
+        const top = Math.min(Math.max(0, ev.clientY - inicio.y), janelaUi.innerHeight - 30);
         Object.assign(painel.style, { left: `${left}px`, top: `${top}px`, right: 'auto', bottom: 'auto' });
       };
-      const soltar = () => { removeEventListener('pointermove', mover, true); removeEventListener('pointerup', soltar, true); guardarPainel(); };
-      addEventListener('pointermove', mover, true);
-      addEventListener('pointerup', soltar, true);
+      const soltar = () => {
+        janelaUi.removeEventListener('pointermove', mover, true);
+        janelaUi.removeEventListener('pointerup', soltar, true);
+        guardarPainel();
+      };
+      janelaUi.addEventListener('pointermove', mover, true);
+      janelaUi.addEventListener('pointerup', soltar, true);
     });
     try {
       const salvo = JSON.parse(localStorage.getItem('ajusteVisualPainel') || 'null');
-      if (salvo?.left) Object.assign(painel.style, { left: salvo.left, top: salvo.top, right: 'auto', bottom: 'auto' });
+      // Na moldura, o painel começa na coluna ao lado do quadro, e não onde estava na página normal.
+      if (salvo?.left && !moldura) Object.assign(painel.style, { left: salvo.left, top: salvo.top, right: 'auto', bottom: 'auto' });
       painel.classList.toggle('min', !!salvo?.min);
       painel.classList.toggle('ajuda', !!salvo?.ajuda);
       if (salvo?.guias === false) guiasLigadas = false;
     } catch { /* sem armazenamento: painel no lugar padrão */ }
     encaixarPainel();
-    addEventListener('resize', encaixarPainel);
+    janelaUi.addEventListener('resize', encaixarPainel);
+    // Com o foco no painel da moldura, as teclas chegam por ela.
+    if (moldura) janelaUi.addEventListener('keydown', teclado, true);
     if (avisoPendente) avisar(avisoPendente);
     atualizarPilula();
     atualizarTelas();
@@ -689,15 +733,16 @@
     // Com o editor desligado o painel está oculto e mede 0: usa a largura fixa dele (300px).
     const largura = painel.offsetWidth || 300;
     const altura = Math.min(painel.offsetHeight || 120, 120);
-    const left = Math.min(Math.max(0, parseFloat(painel.style.left) || 0), Math.max(0, innerWidth - largura - 8));
-    const top = Math.min(Math.max(0, parseFloat(painel.style.top) || 0), Math.max(0, innerHeight - altura));
+    const left = Math.min(Math.max(0, parseFloat(painel.style.left) || 0), Math.max(0, janelaUi.innerWidth - largura - 8));
+    const top = Math.min(Math.max(0, parseFloat(painel.style.top) || 0), Math.max(0, janelaUi.innerHeight - altura));
     Object.assign(painel.style, { left: `${left}px`, top: `${top}px` });
   }
 
   function guardarPainel() {
     try {
+      const salvo = JSON.parse(localStorage.getItem('ajusteVisualPainel') || 'null');
       localStorage.setItem('ajusteVisualPainel', JSON.stringify({
-        left: painel.style.left, top: painel.style.top,
+        left: moldura ? salvo?.left : painel.style.left, top: moldura ? salvo?.top : painel.style.top,
         min: painel.classList.contains('min'), ajuda: painel.classList.contains('ajuda'), guias: guiasLigadas,
       }));
     } catch { /* sem armazenamento: só não lembra a posição */ }
@@ -1019,7 +1064,7 @@
     atualizarPainel();
   }
 
-  window.addEventListener('keydown', (e) => {
+  function teclado(e) {
     if (e.ctrlKey && e.shiftKey && e.code === 'KeyE') { e.preventDefault(); alternar(); return; }
     if (!ligado) return;
     // Texto em edição: Enter ou Esc terminam (Shift+Enter quebra a linha).
@@ -1052,12 +1097,14 @@
         aplicar(el);
       }
     }
-  }, true);
+  }
+  window.addEventListener('keydown', teclado, true);
 
   function alternar() {
     ligado = !ligado;
     if (!host) criarUi();
     host.classList.toggle('on', ligado);
+    hostPainel.classList.toggle('on', ligado);
     atualizarPilula();
     document.documentElement.style.cursor = ligado ? 'crosshair' : '';
     if (ligado) { atualizarPainel(); requestAnimationFrame(laco); }
@@ -1069,6 +1116,7 @@
     if (!document.documentElement) return;
     if (!host) criarUi();
     else if (!host.isConnected) document.documentElement.appendChild(host);
+    if (moldura && hostPainel && !hostPainel.isConnected) docUi.documentElement.appendChild(hostPainel);
   };
 
   /* ---------- guardar e reaplicar ao recarregar ----------
@@ -1254,16 +1302,27 @@
   }
   let esperaTela = 0;
   addEventListener('resize', () => { clearTimeout(esperaTela); esperaTela = setTimeout(trocarTela, 300); });
-  // Botões de largura só existem quando a ferramenta abre a página (precisa do Node para mudar a janela).
+  /* Botões de largura: abrem a página na moldura (/__ajuste-tela, servida pela ferramenta), num quadro
+     com a largura escolhida e o painel ao lado. Já na moldura, só mudam a largura do quadro; "Janela"
+     volta para a página normal. Só existem quando a ferramenta abre a página (precisa do Node). */
   const tamanhosDeTela = [['Celular', 390], ['Tablet', 768], ['Notebook', 1366]];
-  async function mudarTela(largura) {
-    if (!window.__ajusteTela) return;
-    await window.__ajusteTela(largura);
+  function mudarTela(largura) {
+    if (!window.__ajusteFoto) return;
+    if (moldura) {
+      if (!largura) { guardar(); janelaUi.location.href = location.href; return; }
+      window.frameElement.style.width = `${largura}px`;
+      const rotulo = docUi.querySelector('.rotulo');
+      if (rotulo) rotulo.textContent = `${largura}px`;
+      return;
+    }
+    if (!largura) return;
+    guardar();
+    location.href = `${location.origin}${ENDERECO_MOLDURA}?largura=${largura}&pagina=${encodeURIComponent(location.pathname + location.search + location.hash)}`;
   }
   function atualizarTelas() {
     if (!raiz) return;
     const linha = raiz.querySelector('.telas');
-    linha.style.display = window.__ajusteTela ? '' : 'none';
+    linha.style.display = window.__ajusteFoto ? '' : 'none';
     raiz.querySelectorAll('.com-node').forEach((b) => { b.style.display = window.__ajusteFoto ? '' : 'none'; });
     const salvas = Object.keys(guardado?.telas ?? {}).map(Number);
     linha.querySelector('.agora').textContent = `${innerWidth}px`;
@@ -1432,7 +1491,7 @@
       }
       document.documentElement.appendChild(marcas);
       const depois = await window.__ajusteFoto(`${marca}-depois.jpg`);
-      return [`Prints da página inteira: antes ${antes} · depois (com o número de cada item) ${depois}`];
+      return [`Prints ${moldura ? `da tela de ${innerWidth}px (a parte que aparece no quadro)` : "da página inteira"}: antes ${antes} · depois (com o número de cada item) ${depois}`];
     } catch (erro) {
       vivos.forEach(([el], i) => { if (estilos[i] == null) el.removeAttribute('style'); else el.setAttribute('style', estilos[i]); });
       avisar(`Não consegui tirar os prints (${erro.message}).`);

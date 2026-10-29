@@ -67,21 +67,40 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
     return comoDataUrl(caminho);
   });
 
-  // Botões de largura de tela: emula a largura pedida (null volta ao tamanho da janela).
-  const sessoes = new WeakMap();
-  await contexto.exposeBinding('__ajusteTela', async ({ page }, largura) => {
-    if (!sessoes.has(page)) sessoes.set(page, await contexto.newCDPSession(page));
-    const cdp = sessoes.get(page);
-    if (!largura) await cdp.send('Emulation.clearDeviceMetricsOverride');
-    else await cdp.send('Emulation.setDeviceMetricsOverride', { width: largura, height: 0, deviceScaleFactor: 0, mobile: largura < 768 });
+  /* Moldura de tela: /__ajuste-tela no mesmo endereço do site (para o editor no quadro alcançar o
+     painel na moldura) mostra a página num quadro com a largura pedida e deixa a coluna da direita
+     para o painel. Os botões Celular, Tablet e Notebook do editor abrem esta moldura. */
+  await contexto.route('**/__ajuste-tela?*', (rota) => {
+    const pedido = new URL(rota.request().url());
+    const largura = Math.min(Math.max(Number(pedido.searchParams.get('largura')) || 390, 200), 4000);
+    // Só caminhos do próprio site: a moldura não abre outro endereço.
+    const pagina = pedido.searchParams.get('pagina') ?? '/';
+    const caminho = pagina.startsWith('/') && !pagina.startsWith('//') ? pagina : '/';
+    const atributo = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    rota.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Ajuste visual · tela</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2a2a2d; overflow: hidden; font: 12px system-ui, sans-serif; }
+  .palco { position: absolute; inset: 0 336px 0 0; overflow: auto; display: flex; justify-content: center; padding: 28px 24px 16px; box-sizing: border-box; }
+  iframe { flex: none; border: 0; background: #fff; height: 100%; border-radius: 6px; box-shadow: 0 10px 40px rgba(0, 0, 0, .45); }
+  .rotulo { position: absolute; top: 8px; left: 0; right: 336px; text-align: center; color: #a0a0a5; }
+</style></head><body>
+<div class="rotulo">${largura}px</div>
+<div class="palco"><iframe src="${atributo(caminho)}" style="width: ${largura}px"></iframe></div>
+</body></html>`,
+    });
   });
 
   // Prints de antes e depois, na pasta prints/. O nome vem da página: só aceita o formato que o editor gera.
-  await contexto.exposeBinding('__ajusteFoto', async ({ page }, nome) => {
+  // Na moldura, o print é do quadro (a parte da página que aparece nele).
+  await contexto.exposeBinding('__ajusteFoto', async ({ page, frame }, nome) => {
     if (!/^[\w-]+\.jpg$/.test(nome)) return null;
     const destino = join(saida, 'prints', nome);
     mkdirSync(dirname(destino), { recursive: true });
-    await page.screenshot({ path: destino, fullPage: true, type: 'jpeg', quality: 75, animations: 'disabled' });
+    const opcoes = { path: destino, type: 'jpeg', quality: 75, animations: 'disabled' };
+    if (frame && frame !== page.mainFrame()) await (await frame.frameElement()).screenshot(opcoes);
+    else await page.screenshot({ ...opcoes, fullPage: true });
     return destino;
   });
 

@@ -70,7 +70,12 @@ USAR (na janela que abrir)
 
 LARGURAS DE TELA
   A linha "Tela" do painel tem Celular (390px), Tablet (768px), Notebook (1366px) e
-  Janela (volta ao tamanho da janela). Cada largura guarda os seus próprios ajustes:
+  Janela. Celular, Tablet e Notebook abrem a página num quadro com essa largura, no
+  meio da janela, e o painel fica na coluna da direita, sem cobrir a página. Dentro
+  do quadro, trocar entre eles só muda a largura; Janela volta para a página normal.
+  (Se um site bloquear ser aberto dentro de um quadro, o quadro fica em branco.)
+  Na moldura, os prints são da parte da página que aparece no quadro.
+  Cada largura guarda os seus próprios ajustes:
   ao trocar, os da largura anterior saem da tela e ficam guardados (um ponto no botão
   mostra que aquela largura tem ajustes). O texto sai separado por largura, para o
   agente aplicar cada grupo na sua media query.

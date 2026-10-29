@@ -40,9 +40,11 @@ function conferir(nome, ok, detalhe = '') {
   if (!ok) falhas.push(`${nome}${detalhe ? `\n     ${detalhe}` : ''}`);
   console.log(`${ok ? '  ok ' : 'FALHA'}  ${nome}`);
 }
+// alvo: onde está a página (a própria aba, ou o quadro da moldura de tela).
+let alvo = pagina;
 const botao = (acao) => pagina.locator(`[data-ajuste-visual] button[data-acao="${acao}"]`);
 const centro = async (seletor) => {
-  const r = await pagina.locator(seletor).first().boundingBox();
+  const r = await alvo.locator(seletor).first().boundingBox();
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 };
 async function arrastar(de, dx, dy) {
@@ -83,7 +85,7 @@ texto = await relatorio();
 conferir('rotação final soma a que a página já tinha', texto.includes('rotate: 12deg'), texto);
 
 /* ---------- 3. reaplicar ao recarregar ---------- */
-const caixa = (seletor) => pagina.locator(seletor).first().boundingBox();
+const caixa = (seletor) => alvo.locator(seletor).first().boundingBox();
 const aviso = () => pagina.locator('[data-ajuste-visual] .aviso').textContent();
 const recarregar = async () => { await pagina.reload(); await pagina.waitForTimeout(900); };
 const igual = (a, b) => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
@@ -114,23 +116,37 @@ await botao('limpar').click();
 await recarregar();
 conferir('"Limpar tudo" também apaga o que estava guardado', !(await aviso()), await aviso());
 
-/* ---------- 4. larguras de tela ---------- */
+/* ---------- 4. larguras de tela (moldura com o painel ao lado) ---------- */
 const telaBotao = (w) => pagina.locator(`[data-ajuste-visual] button[data-tela="${w}"]`);
+const largura = () => alvo.evaluate(() => innerWidth);
 await ligar();
 await arrastar(await centro('.arte-a'), 50, 20);
 const naLargura = await caixa('.arte-a');
 await telaBotao(390).click();
-await pagina.waitForTimeout(900);
-conferir('botão Celular muda a largura para 390px', await pagina.evaluate(() => innerWidth) === 390);
-conferir('avisa a troca de largura', (await aviso()).includes('Tela 1280px → 390px'), await aviso());
-conferir('na outra largura, o ajuste de 1280px sai da tela', (await pagina.evaluate(() => document.querySelector('.arte-a').style.translate)) === '');
+await pagina.waitForURL(/__ajuste-tela/);
+await pagina.waitForTimeout(1200);
+alvo = pagina.frames().find((f) => f !== pagina.mainFrame());
+conferir('botão Celular abre a página num quadro de 390px', !!alvo && (await largura()) === 390);
+await ligar();
+const quadro = await pagina.locator('iframe').boundingBox();
+const lado = await pagina.locator('[data-ajuste-visual] .painel').boundingBox();
+conferir('o painel fica ao lado do quadro, sem cobrir a página', lado.x >= quadro.x + quadro.width, JSON.stringify({ quadro, lado }));
+conferir('na outra largura, o ajuste de 1280px não aparece', (await alvo.evaluate(() => document.querySelector('.arte-a').style.translate)) === '');
 await arrastar(await centro('.card h2'), 0, 30);
+// ~30px para baixo (as guias podem grudar alguns px adiante).
+conferir('arrastar dentro do quadro funciona', /moveu 0, 3\dpx/.test(await pagina.locator('[data-ajuste-visual] .sel-info').innerText()), await pagina.locator('[data-ajuste-visual] .sel-info').innerText());
 texto = await relatorio();
 conferir('o texto separa os ajustes por largura', texto.includes('=== Tela de 1280px de largura ===') && texto.includes('=== Tela de 390px de largura (a atual) ==='), texto);
-// Volta a 1280px (o botão "Janela", aqui no teste, cairia no tamanho da janela invisível do Chrome).
-await pagina.evaluate(() => window.__ajusteTela(1280));
+await telaBotao(768).click();
 await pagina.waitForTimeout(900);
+conferir('na moldura, Tablet só muda a largura do quadro', (await largura()) === 768 && (await aviso()).includes('Tela 390px → 768px'), await aviso());
+await telaBotao(0).click();
+await pagina.waitForURL((u) => !u.href.includes('__ajuste-tela'));
+await pagina.waitForTimeout(900);
+alvo = pagina;
+conferir('Janela volta para a página normal', (await largura()) === 1280);
 conferir('voltando, os ajustes daquela largura voltam', igual(naLargura, await caixa('.arte-a')), JSON.stringify([naLargura, await caixa('.arte-a')]));
+await ligar();
 
 /* ---------- 5. prints ---------- */
 await botao('copiar-prints').click();
@@ -221,9 +237,6 @@ conferir('na frente de tudo, avisa e não muda', (await aviso()).includes('Já e
 await pagina.keyboard.press('Control+BracketLeft');
 conferir('Ctrl+[ manda para trás', (await zFundo()) === '0', await zFundo());
 
-await telaBotao(0).click();
-await pagina.waitForTimeout(900);
-conferir('botão Janela tira a largura emulada', await pagina.evaluate(() => innerWidth) !== 1280);
 
 console.log(`\n${total - falhas.length}/${total} conferências passaram.`);
 if (falhas.length) console.log(`\nFalhas:\n- ${falhas.join('\n- ')}`);
