@@ -5,7 +5,8 @@
   "description": "Abre qualquer página no Chrome com um editor para arrastar, redimensionar e girar elementos e copiar as alterações em texto.",
   "type": "module",
   "scripts": {
-    "start": "node abrir.mjs"
+    "start": "node abrir.mjs",
+    "test": "node teste/testar.mjs"
   },
   "dependencies": {
     "playwright-core": "1.49.1"

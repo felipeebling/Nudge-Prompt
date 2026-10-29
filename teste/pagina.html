@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Página de teste do Ajuste Visual</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f4efe6; }
+  .palco { position: relative; min-height: 1600px; overflow: hidden; }
+  .arte { position: absolute; width: 160px; pointer-events: none; }
+  .arte-a { left: 40px; top: 60px; }
+  .arte-b { right: 60px; top: 300px; rotate: 10deg; }
+  .card { position: relative; z-index: 1; width: 360px; margin: 160px auto 0; padding: 24px; background: #fff; border-radius: 12px; }
+  .card h2 { margin: 0 0 8px; color: #3a2a1a; font-size: 28px; }
+  .botao { display: inline-block; margin-top: 12px; padding: 8px 16px; background: #c4572f; color: #fff; border-radius: 6px; }
+  @media (max-width: 600px) { .card { width: auto; margin: 120px 16px 0; } }
+</style>
+</head>
+<body>
+<main class="palco" data-astro-source-file="C:/site/src/pages/teste.astro" data-astro-source-loc="20:1">
+  <img class="arte arte-a" alt="" data-astro-source-file="C:/site/src/components/Artes.astro" data-astro-source-loc="7:3"
+    src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%23e0a060'/%3E%3C/svg%3E">
+  <img class="arte arte-b" alt=""
+    src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Crect width='10' height='10' fill='%236a8f5a'/%3E%3C/svg%3E">
+  <section class="card">
+    <h2 data-astro-source-file="C:/site/src/components/Card.astro" data-astro-source-loc="12:5">Conheça a cidade</h2>
+    <p>Um texto de exemplo para editar.</p>
+    <a class="botao" href="#">Saiba mais</a>
+  </section>
+</main>
+</body>
+</html>

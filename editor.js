@@ -42,6 +42,28 @@
     }
     return partes.join(' > ');
   }
+  /* Arquivo (e linha, quando há) do código que gerou o elemento, se o servidor de desenvolvimento
+     marcar: Astro (data-astro-source-*), React até a 18 (_debugSource), Vue e Svelte (só o arquivo).
+     Sem marca no próprio elemento, sobe pelos ancestrais e diz de qual veio. */
+  function origemDireta(n) {
+    const astro = n.getAttribute('data-astro-source-file');
+    if (astro) {
+      const linha = (n.getAttribute('data-astro-source-loc') || '').split(':')[0];
+      return linha ? `${astro}:${linha}` : astro;
+    }
+    const chave = Object.keys(n).find((k) => k.startsWith('__reactFiber$'));
+    for (let f = chave ? n[chave] : null; f; f = f.return) {
+      if (f._debugSource) return `${f._debugSource.fileName}:${f._debugSource.lineNumber}`;
+    }
+    return n.__vueParentComponent?.type?.__file || n.__svelte_meta?.loc?.file || '';
+  }
+  function origemDe(el) {
+    for (let n = el, nivel = 0; n && n.nodeType === 1 && nivel < 20; n = n.parentElement, nivel++) {
+      const local = origemDireta(n);
+      if (local) return nivel ? `${local} (marca do ancestral <${n.tagName.toLowerCase()}${n.classList[0] ? `.${n.classList[0]}` : ''}>)` : local;
+    }
+    return '';
+  }
   function descrever(el) {
     let d = el.tagName.toLowerCase();
     if (el.id) d += `#${el.id}`;
@@ -160,7 +182,7 @@
     const s = estado(img);
     s.novo = {
       nome: arquivo.nome, caminho: arquivo.caminho, left, top, largura,
-      pai: seletor(pai), referencia: referencia ? descrever(referencia) : null,
+      pai: seletor(pai), referencia: referencia ? descrever(referencia) : null, codigo: origemDe(referencia ?? pai),
       base: img.offsetParent ? seletor(img.offsetParent) : 'a página',
     };
     selecionar(img);
@@ -379,7 +401,8 @@
   }
   const lista = (els) => els.map((el, i) => {
     const r = rotulo(el);
-    return `<li data-i="${i}" class="${el === selecionado ? 'on' : ''}" title="${html(descrever(el) + '\n' + seletor(el))}">${html(r.nome)}${r.extra ? ` <span class="g">· ${html(r.extra)}</span>` : ''}</li>`;
+    const codigo = origemDe(el);
+    return `<li data-i="${i}" class="${el === selecionado ? 'on' : ''}" title="${html(descrever(el) + '\n' + seletor(el) + (codigo ? `\n${codigo}` : ''))}">${html(r.nome)}${r.extra ? ` <span class="g">· ${html(r.extra)}</span>` : ''}</li>`;
   }).join('');
 
   function atualizarPainel() {
@@ -389,11 +412,13 @@
       const s = alteracoes.get(selecionado);
       const r = selecionado.getBoundingClientRect();
       const n = rotulo(selecionado);
-      info.title = descrever(selecionado);
+      const codigo = origemDe(selecionado);
+      info.title = descrever(selecionado) + (codigo ? `\n${codigo}` : '');
       info.innerHTML = `<b>${html(n.nome)}</b>${n.extra ? ` <span>· ${html(n.extra)}</span>` : ''}` +
         `<small>${Math.round(r.width)}×${Math.round(r.height)}px` +
         (s?.removido ? ' · removido' : '') +
-        (s && mudou(s) && !s.removido ? ` · moveu ${s.dx}, ${s.dy}px` + (s.rot ? ` · girou ${s.rot}°` : '') + (s.opacidade != null ? ` · opac. ${s.opacidade}` : '') : '') + '</small>';
+        (s && mudou(s) && !s.removido ? ` · moveu ${s.dx}, ${s.dy}px` + (s.rot ? ` · girou ${s.rot}°` : '') + (s.opacidade != null ? ` · opac. ${s.opacidade}` : '') : '') + '</small>' +
+        (codigo ? `<small>${html(codigo.split(/[\\/]/).slice(-2).join('/'))}</small>` : '');
     } else info.textContent = 'Nenhum elemento escolhido.';
     raiz.querySelector('.candidatos').innerHTML = lista(candidatos);
     // Mostra só o que de fato mudou (escolher um elemento sem mexer não conta).
@@ -582,6 +607,7 @@
           `${i + 1}. ADICIONAR imagem nova  [${n.nome}]`,
           `   arquivo: ${n.caminho}`,
           `   colocar dentro de: ${n.pai}` + (n.referencia ? ` (mesma camada de ${n.referencia})` : ''),
+          ...(n.codigo ? [`   código do elemento de referência: ${n.codigo}`] : []),
           `   posição absoluta em relação a ${n.base}: left ${n.left + s.dx}px, top ${n.top + s.dy}px`,
           `   largura: ${largura}px` + (s.altura != null ? ` · altura ${s.altura}px` : ' · altura automática') + (extras.length ? ` · ${extras.join(' · ')}` : ''),
           '',
@@ -601,8 +627,10 @@
       if (s.espelhado) partes.push('   espelhar: inverter na horizontal');
       // Removido vale mais que qualquer outro ajuste no mesmo elemento.
       if (s.removido) partes.splice(0, partes.length, '   remover: tirar este elemento da página');
+      const codigo = origemDe(el);
       linhas.push(
         `${i + 1}. ${descrever(el)}`,
+        ...(codigo ? [`   código: ${codigo}`] : []),
         `   seletor: ${seletor(el)}`,
         `   posição original na página: x ${o.x}px, y ${o.y}px · tamanho ${Math.round(o.largura)}×${Math.round(o.altura)}px`,
         ...partes,
