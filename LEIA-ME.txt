@@ -1,7 +1,7 @@
 AJUSTE VISUAL
 Abre qualquer página num Chrome à parte com um editor para mover, redimensionar,
-girar e mudar a opacidade de elementos, e gera um texto com as alterações para
-colar no Claude ou no Codex aplicar no código.
+girar, mudar opacidade, texto e estilo de elementos, e gera um texto com as
+alterações para colar no Claude ou no Codex aplicar no código.
 
 ABRIR
   Dois cliques em "Ajuste Visual.cmd". Ele pergunta o endereço (Enter = http://localhost:4321).
@@ -9,12 +9,22 @@ ABRIR
   Na primeira vez ele instala o necessário sozinho (precisa do Node instalado).
 
 USAR (na janela que abrir)
-  Botão "✎ Ajuste visual" (canto inferior esquerdo) ... liga/desliga o editor
+  Botão "✎ Ajuste visual" (canto inferior esquerdo) ... liga/desliga o editor.
+                         Desligado, mostra quantas alterações estão na tela.
   Ctrl+Shift+E ......... atalho para o mesmo botão
   Clique + arrastar .... escolhe e move o elemento. Clicar dentro do elemento já
                          escolhido arrasta ele mesmo, mesmo que esteja atrás de outro.
                          Seções e blocos que ocupam mais de meia tela não são pegos
                          no clique: escolha-os pela lista do painel, se precisar.
+  Shift+clique ......... põe ou tira um elemento da seleção. A seleção inteira se
+                         move junto (arrastar, setas), e a barra de botões abaixo do
+                         nome alinha (esquerda, centro, direita, topo, meio, base) e
+                         distribui (3 ou mais) os elementos escolhidos.
+  Guias ................ ao arrastar, o elemento gruda nas bordas e centros dos que
+                         estão por perto e no centro da tela (linha rosa). Ctrl
+                         segurado move livre. Com um elemento escolhido, passe o
+                         mouse sobre outro para ver a distância entre eles.
+                         Botão "Guias: sim/não" liga e desliga.
   Alt+clique ........... pega o que está escondido atrás (decoração de fundo);
                          repita no mesmo lugar para ir mais fundo
   Alças laranja ........ mudam o tamanho: as do meio de cada lado mudam só a
@@ -26,28 +36,72 @@ USAR (na janela que abrir)
   Alt+rodinha .......... opacidade
   Setas ................ move 1px (Shift: 10px)
   [ e ] ................ elemento de trás / da frente no mesmo ponto
+  Duplo clique ......... edita o texto do elemento escolhido (botão "Editar texto"
+                         faz o mesmo). Enter ou Esc termina; Shift+Enter quebra a linha.
+  Estilo ............... (no painel) cor do texto, cor de fundo, tamanho e peso da
+                         fonte, altura da linha, espaço entre letras, padding, margem,
+                         arredondamento e camada (z-index). Escreva o valor e aperte
+                         Enter; vazio volta ao valor da página. Vale para a seleção toda.
+  Nota ................. (no painel) um pedido livre para o agente, como "trocar esta
+                         foto". Com um elemento escolhido, a nota é dele; sem nada
+                         escolhido, é uma nota geral da página.
   + Imagem ............. abre a janela de arquivos do Windows; a imagem escolhida entra
                          na mesma camada do elemento selecionado (escolha antes uma
                          gravura, com Alt+clique, para ela ir junto das gravuras), no
                          meio da tela, e já pode ser arrastada, redimensionada e girada.
                          No texto sai como "ADICIONAR imagem nova", com o caminho do
                          arquivo, onde colocar, posição e tamanho finais.
-  H .................... espelha o elemento na horizontal (botão "Espelhar")
-  Delete ............... remove o elemento escolhido (botão "Remover" faz o mesmo);
-                         no texto ele sai como "remover: tirar este elemento da página"
+  H .................... espelha na horizontal (botão "Espelhar")
+  Delete ............... remove (botão "Remover" faz o mesmo);
+                         no texto sai como "remover: tirar este elemento da página"
   Ctrl+Z ............... desfaz (inclusive remoção; "Restaurar este" também traz de volta)
-  Esc .................. solta o elemento
+  Esc .................. solta o elemento (num campo do painel, o primeiro Esc sai do campo)
   Painel ............... arraste pelo título para mudar de lugar; "?" mostra os
                          atalhos e "–" recolhe. Lista "Elementos neste ponto"
                          (clique para escolher; nome completo ao passar o mouse)
                          e "Alterados"; botão "Parar animações" ajuda a
                          posicionar peças que se mexem
 
+LARGURAS DE TELA
+  A linha "Tela" do painel tem Celular (390px), Tablet (768px), Notebook (1366px) e
+  Janela (volta ao tamanho da janela). Cada largura guarda os seus próprios ajustes:
+  ao trocar, os da largura anterior saem da tela e ficam guardados (um ponto no botão
+  mostra que aquela largura tem ajustes). O texto sai separado por largura, para o
+  agente aplicar cada grupo na sua media query.
+
 COPIAR
   "Copiar alterações" copia o texto para a área de transferência e salva em
   alteracoes.txt nesta pasta. Cole no chat do agente.
+  "Copiar com prints" faz o mesmo e salva na pasta "prints" dois prints da página
+  inteira: antes (sem os ajustes) e depois (com eles e o número de cada item do
+  texto marcado em cima do elemento). O texto traz o caminho dos dois.
+
+  Para cada elemento, o texto traz:
+  - código: o arquivo e a linha que geram o elemento, quando o servidor de
+    desenvolvimento informa (Astro, React até a 18; Vue e Svelte só o arquivo).
+    Se o elemento não tiver a marca, vale a do ancestral mais próximo.
+  - o que mudou (mover, tamanho, girar, opacidade, texto, estilo, nota);
+  - CSS final: as propriedades que reproduzem na tela o mesmo resultado, já somadas
+    ao que a página tinha, e as medidas em % da largura do contêiner.
+
+RECARREGAR
+  As alterações ficam guardadas por página e voltam quando a página recarrega
+  (por exemplo, quando o agente muda o código e o servidor recarrega). Antes de
+  reaplicar, cada uma é conferida:
+  - o elemento está como era antes do ajuste ......... reaplica;
+  - já está como ficou depois do ajuste .............. o código já tem a mudança, não reaplica;
+  - está diferente dos dois, ou não foi achado ....... não mexe, avisa no painel e mantém
+                                                       o pedido no texto, com um "atenção".
+  "Limpar tudo" apaga as alterações de todas as larguras e a nota geral.
 
 OBSERVAÇÕES
-  - As mudanças são só na tela: recarregar a página apaga tudo.
   - Os valores valem para a largura de tela em que você ajustou (aparece no texto).
   - Esta janela usa um perfil próprio (pasta "perfil"), separado do seu Chrome.
+  - Imagens novas são relidas do arquivo ao recarregar; só as escolhidas pela janela
+    de arquivos podem ser lidas (a lista fica em config.json).
+
+PARA QUEM MEXE NO CÓDIGO
+  editor.js ....... o editor, injetado em todas as páginas
+  ligacoes.mjs .... funções do Node que o editor chama (copiar, imagem, tela, prints)
+  abrir.mjs ....... abre o navegador
+  npm test ........ abre teste/pagina.html num Chrome invisível, usa o editor e confere o texto
