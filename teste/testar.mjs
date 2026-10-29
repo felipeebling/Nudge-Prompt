@@ -70,6 +70,18 @@ await arrastar(await centro('.arte-b'), -30, 0);
 texto = await relatorio();
 conferir('sem marca no elemento, usa a do ancestral', /código: C:\/site\/src\/pages\/teste\.astro:20 \(marca do ancestral <main\.palco>\)/.test(texto), texto);
 
+/* ---------- 2. CSS final ---------- */
+conferir('CSS final do deslocamento', texto.includes('CSS final: translate: 50px 20px'), texto);
+conferir('sugere mexer no left/top de elemento absoluto', texto.includes('some 50px no left e 20px no top'), texto);
+conferir('deslocamento em proporção do contêiner', texto.includes('em proporção da largura do contêiner (1280px): deslocamento horizontal 3.9%'), texto);
+// .arte-b já tem rotate: 10deg na página; Shift+rodinha gira mais 2°.
+await pagina.mouse.move((await centro('.arte-b')).x, (await centro('.arte-b')).y);
+await pagina.keyboard.down('Shift');
+await pagina.mouse.wheel(0, -100);
+await pagina.keyboard.up('Shift');
+texto = await relatorio();
+conferir('rotação final soma a que a página já tinha', texto.includes('rotate: 12deg'), texto);
+
 /* ---------- 3. reaplicar ao recarregar ---------- */
 const caixa = (seletor) => pagina.locator(seletor).first().boundingBox();
 const aviso = () => pagina.locator('[data-ajuste-visual] .aviso').textContent();

@@ -97,6 +97,10 @@
         orig: {
           descricao: descrever(el), seletor: seletor(el),
           sinal: sinalHorizontal(cs),
+          // Para o CSS final: como a página já posiciona e gira o elemento, e a largura do contêiner.
+          posicao: cs.position,
+          rotacaoTransform: (() => { const m = cs.transform.match(/matrix\(([^,]+),\s*([^,]+)/); return m ? Math.round(Math.atan2(num(m[2]), num(m[1])) * 180 / Math.PI) : 0; })(),
+          larguraPai: Math.round((el.offsetParent ?? el.parentElement ?? document.documentElement).clientWidth),
           estiloInline: el.getAttribute('style'),
           translate: cs.translate,
           rotate: num(cs.rotate),
@@ -762,6 +766,36 @@
   addEventListener('pagehide', guardar);
 
   /* ---------- texto das alterações ---------- */
+  /* CSS que reproduz na tela o mesmo resultado, somado ao que a página já tem, e as medidas em
+     proporção do contêiner (útil quando o código usa % ou vw). */
+  const pct = (v, total) => `${Math.round((v / total) * 1000) / 10}%`;
+  function cssFinal(o, s) {
+    const css = [];
+    if (s.dx || s.dy) {
+      const [tx = '0px', ty = '0px'] = o.translate === 'none' ? [] : o.translate.split(' ');
+      const soma = (base, d) => (/^-?[\d.]+px$/.test(base) ? `${Math.round(num(base) + d)}px` : `calc(${base} + ${d}px)`);
+      css.push(`translate: ${soma(tx, s.dx)} ${soma(ty, s.dy)}`);
+    }
+    if (s.rot) css.push(`rotate: ${o.rotate + s.rot}deg`);
+    if (s.largura != null) css.push(`width: ${s.largura}px`);
+    if (s.altura != null) css.push(`height: ${s.altura}px`);
+    if (s.opacidade != null) css.push(`opacity: ${s.opacidade}`);
+    if (s.espelhado) css.push('scale: -1 1');
+    if (!css.length) return [];
+    const linhas = [`   CSS final: ${css.join('; ')}`];
+    if (o.rotacaoTransform && s.rot) linhas.push(`   (a página também gira este elemento ${o.rotacaoTransform}° pelo transform; na tela ele fica em ${o.rotacaoTransform + o.rotate + s.rot}°)`);
+    if (o.larguraPai) {
+      const prop = [];
+      if (s.dx) prop.push(`deslocamento horizontal ${pct(s.dx, o.larguraPai)}`);
+      if (s.dy) prop.push(`vertical ${pct(s.dy, o.larguraPai)}`);
+      if (s.largura != null) prop.push(`largura ${pct(s.largura, o.larguraPai)}`);
+      if (prop.length) linhas.push(`   em proporção da largura do contêiner (${o.larguraPai}px): ${prop.join(' · ')}`);
+    }
+    if ((s.dx || s.dy) && /absolute|fixed/.test(o.posicao)) {
+      linhas.push(`   ou, como é position: ${o.posicao}, some ${s.dx}px no left e ${s.dy}px no top (se estiver preso por right/bottom, subtraia deles)`);
+    }
+    return linhas;
+  }
   function relatorio() {
     guardar();
     const itens = [...registrosAtuais(), ...parados];
@@ -810,6 +844,7 @@
       if (s.rot) partes.push(`   girar: ${s.rot > 0 ? '+' : ''}${s.rot}° a mais que a rotação atual (${s.rot > 0 ? 'sentido horário' : 'anti-horário'})`);
       if (s.opacidade != null) partes.push(`   opacidade: ${o.opacidade} → ${s.opacidade}`);
       if (s.espelhado) partes.push('   espelhar: inverter na horizontal');
+      partes.push(...cssFinal(o, s));
       // Removido vale mais que qualquer outro ajuste no mesmo elemento.
       if (s.removido) partes.splice(0, partes.length, '   remover: tirar este elemento da página');
       linhas.push(
