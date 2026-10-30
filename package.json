@@ -1,6 +1,8 @@
 {
-  "name": "ajuste-visual",
+  "name": "nudge-prompt",
   "version": "1.0.0",
+  "license": "MIT",
+  "repository": "github:felipeebling/Nudge-Prompt",
   "private": true,
   "description": "Abre qualquer página no Chrome com um editor para arrastar, redimensionar e girar elementos e copiar as alterações em texto.",
   "type": "module",

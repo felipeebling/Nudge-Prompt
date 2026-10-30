@@ -1,15 +1,15 @@
-AJUSTE VISUAL
+NUDGE PROMPT
 Abre qualquer página num Chrome à parte com um editor para mover, redimensionar,
 girar, mudar opacidade, texto e estilo de elementos, e gera um texto com as
 alterações para colar no Claude ou no Codex aplicar no código.
 
 ABRIR
-  Dois cliques em "Ajuste Visual.cmd". Ele pergunta o endereço (Enter = http://localhost:4321).
-  Também dá para abrir direto:  "Ajuste Visual.cmd" localhost:4321/turismo
+  Dois cliques em "Nudge Prompt.cmd". Ele pergunta o endereço (Enter = http://localhost:4321).
+  Também dá para abrir direto:  "Nudge Prompt.cmd" localhost:4321/turismo
   Na primeira vez ele instala o necessário sozinho (precisa do Node instalado).
 
 USAR (na janela que abrir)
-  Botão "✎ Ajuste visual" (canto inferior esquerdo) ... liga/desliga o editor.
+  Botão "✎ Nudge Prompt" (canto inferior esquerdo) ... liga/desliga o editor.
                          Desligado, mostra quantas alterações estão na tela.
   Ctrl+Shift+E ......... atalho para o mesmo botão
   Clique + arrastar .... escolhe e move o elemento. Clicar dentro do elemento já

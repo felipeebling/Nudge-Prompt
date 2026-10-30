@@ -97,7 +97,7 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
     const atributo = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     rota.fulfill({
       contentType: 'text/html; charset=utf-8',
-      body: `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Ajuste visual · tela</title>
+      body: `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Nudge Prompt · tela</title>
 <style>
   html, body { margin: 0; height: 100%; background: #2a2a2d; overflow: hidden; font: 12px system-ui, sans-serif; }
   .palco { position: absolute; inset: 0 336px 0 0; overflow: auto; display: flex; justify-content: center; padding: 28px 24px 16px; box-sizing: border-box; }

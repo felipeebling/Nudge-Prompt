@@ -1,4 +1,4 @@
-/* Ajuste visual — editor injetado em qualquer página.
+/* Nudge Prompt — editor injetado em qualquer página.
    Ctrl+Shift+E liga/desliga. Clique para escolher um elemento e arraste para mover.
    As mudanças são só na tela; "Copiar alterações" gera um texto para um agente aplicar no código. */
 (() => {
@@ -662,7 +662,7 @@
         /* Na moldura de tela, o painel ocupa a coluna da direita, ao lado do quadro. */
         .painel.lado { top: 12px; bottom: 12px; right: 12px; left: auto; max-height: none; }
       </style>`;
-    const pilula = '<button class="pilula" data-acao="alternar" title="Ctrl+Shift+E">✎ Ajuste visual</button>';
+    const pilula = '<button class="pilula" data-acao="alternar" title="Ctrl+Shift+E">✎ Nudge Prompt</button>';
     const caixas = `
       <div class="caixa hover"></div>
       <div class="caixa sel">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((a) => `<div class="alca" data-a="${a}" title="Puxe para mudar o tamanho"></div>`).join('')}<div class="alca" data-a="rot" title="Puxe para girar (Shift: de 15 em 15°)"></div></div>
@@ -672,7 +672,7 @@
       <div class="soltar"><span>Solte para adicionar a imagem aqui</span></div>`;
     const htmlPainel = `
       <div class="painel${moldura ? ' lado' : ''}">
-        <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
+        <div class="topo" title="Arraste para mover o painel"><span>⠿ Nudge Prompt</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
           <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Bolinha branca em cima: girar (Shift: de 15 em 15°). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · Para frente / Para trás (Ctrl+] / Ctrl+[): passa por cima ou por baixo do elemento que se sobrepõe · Imagem nova: botão + Imagem, arrastar o arquivo do Windows para a página ou Ctrl+V · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
           <div class="telas" title="Mudar a largura da tela. Cada largura guarda os seus próprios ajustes (ponto: tem ajustes guardados).">Tela <b class="agora"></b>
@@ -1020,7 +1020,7 @@
   function atualizarPilula() {
     if (!raiz) return;
     const n = [...alteracoes.values()].filter(mudou).length;
-    raiz.querySelector('.pilula').textContent = ligado ? '✕ Desligar ajuste' : `✎ Ajuste visual${n ? ` · ${n}` : ''}`;
+    raiz.querySelector('.pilula').textContent = ligado ? '✕ Desligar ajuste' : `✎ Nudge Prompt${n ? ` · ${n}` : ''}`;
   }
 
   /* ---------- arrastar, redimensionar ---------- */
@@ -1461,7 +1461,7 @@
     if (!registros.length) { carregado = true; atualizarPilula(); return; }
     const conta = await reaplicar(registros);
     const resumo = resumoConferencia(conta);
-    console.info(`[Ajuste visual] Depois de recarregar: ${resumo}`);
+    console.info(`[Nudge Prompt] Depois de recarregar: ${resumo}`);
     avisar(`Depois de recarregar: ${resumo}`);
   }
   /* Cada largura de tela tem os seus ajustes: ao mudar a largura (botões do painel ou a janela),
@@ -1563,7 +1563,7 @@
       sumiu: '   atenção: depois de recarregar, não achei este elemento na página; confira se ainda vale',
     };
     const linhas = [
-      'Ajuste visual — alterações feitas na tela',
+      'Nudge Prompt — alterações feitas na tela',
       `Página: ${location.href}`,
       `Tela: ${innerWidth}×${innerHeight}px · ${new Date().toLocaleString('pt-BR')}`,
       larguras.length > 1
@@ -1693,7 +1693,7 @@
       const prints = comPrints ? await tirarPrints() : [];
       texto = relatorio(prints);
     } catch (erro) {
-      console.error(`[Ajuste visual] erro ao montar o texto: ${erro.stack || erro.message}`);
+      console.error(`[Nudge Prompt] erro ao montar o texto: ${erro.stack || erro.message}`);
       avisar(`Erro ao montar o texto: ${erro.message}${erro.stack ? ` (${erro.stack.split('\n')[1]?.trim()})` : ''}`);
       return;
     }
