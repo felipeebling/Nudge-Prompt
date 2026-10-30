@@ -222,6 +222,15 @@ await ligar();
 conferir('"Limpar tudo" limpa também as outras larguras', !texto.includes('=== Tela de 390px'), texto);
 conferir('a nota geral volta depois de recarregar', (await pagina.locator('[data-ajuste-visual] .nota').inputValue()) === 'Deixar a página mais clara');
 
+/* ---------- elemento que sai da página ---------- */
+// O site troca um pedaço da página (recarga parcial, componente que renderiza de novo) depois do ajuste.
+await botao('limpar').click();
+await pagina.keyboard.press('Escape');
+await arrastar(await centro('.botao'), 20, 0);
+await pagina.evaluate(() => { const b = document.querySelector('.botao'); b.replaceWith(b.cloneNode(true)); });
+texto = await relatorio();
+conferir('copiar funciona com um elemento ajustado que saiu da página', texto.includes('mover: 20px para a direita'), await aviso());
+
 /* ---------- camadas: para frente / para trás ---------- */
 await botao('limpar').click();
 await pagina.keyboard.press('Escape');

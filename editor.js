@@ -109,7 +109,8 @@
     let x = 0, y = 0;
     for (let n = el; n; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
     const cs = getComputedStyle(el);
-    const [tx = '0px', ty = '0px'] = cs.translate === 'none' ? [] : cs.translate.match(/calc\([^)]*\)|\S+/g);
+    // Elemento fora da página não tem estilo calculado (translate vem vazio).
+    const [tx = '0px', ty = '0px'] = cs.translate === 'none' ? [] : cs.translate.match(/calc\([^)]*\)|\S+/g) ?? [];
     return {
       x: Math.round(x + deslocamento(tx, el.offsetWidth)), y: Math.round(y + deslocamento(ty, el.offsetHeight)),
       largura: el.offsetWidth, altura: el.offsetHeight,
@@ -1167,7 +1168,11 @@
     };
   }
   // Imagem nova que depois foi removida não conta.
-  const registrosAtuais = () => [...alteracoes.entries()].filter(([, s]) => mudou(s) && !(s.novo && s.removido)).map(([el, s]) => registro(el, s));
+  /* Um elemento ajustado pode sair da página (o site troca um pedaço dela, um componente renderiza de
+     novo). Ele não dá mais para medir: vale o último registro de quando ainda estava na página. */
+  const registrosAtuais = () => [...alteracoes.entries()]
+    .filter(([, s]) => mudou(s) && !(s.novo && s.removido))
+    .map(([el, s]) => (el.isConnected || !s.ultimoRegistro ? (s.ultimoRegistro = registro(el, s)) : s.ultimoRegistro));
 
   function acharElemento(r) {
     let el = null;
