@@ -264,8 +264,10 @@
     avisar(s.texto != null ? 'Texto alterado.' : '');
   }
 
-  /* "+ Imagem": entra na mesma camada do elemento escolhido (ex.: junto das gravuras de fundo),
-     no meio da tela, com a largura dele; sem nada escolhido, vai solta na página. */
+  /* Imagem nova: pelo botão "+ Imagem" (janela de arquivos), soltando um arquivo na página ou colando
+     com Ctrl+V. Com um elemento escolhido, o botão e o colar põem a imagem na mesma camada dele (ex.:
+     junto das gravuras de fundo), no meio da tela, com a largura dele. Sem nada escolhido, ou soltando
+     o arquivo na página, ela vai solta na página e por cima de tudo, para aparecer na hora. */
   async function escolherArquivo() {
     if (window.__ajusteEscolherImagem) return window.__ajusteEscolherImagem();
     return new Promise((ok) => {
@@ -293,33 +295,100 @@
     if (!img.complete) await new Promise((ok) => { img.onload = ok; img.onerror = ok; });
     return img;
   }
-  async function adicionarImagem() {
-    if (window.__ajusteEscolherImagem) avisar('Abrindo a janela de arquivos do Windows…');
-    const arquivo = await escolherArquivo().catch(() => null);
-    if (!arquivo) { avisar(''); return; }
+  // Arquivo solto na página ou colado: o navegador não diz o caminho, então a ferramenta guarda uma
+  // cópia na pasta "imagens" e devolve esse caminho (sem a ferramenta, fica só o nome).
+  async function lerArquivo(f) {
+    const tipo = f.type.split('/')[1]?.replace('svg+xml', 'svg').replace('jpeg', 'jpg') || 'png';
+    // Print colado vem sempre como "image.png": ganha um nome com a hora.
+    const nome = f.name && f.name !== 'image.png' ? f.name : `colada-${new Date().toLocaleString('sv-SE').replace(/[: ]/g, '-')}.${tipo}`;
+    if (!window.__ajusteGuardarImagem) return { caminho: nome, nome, url: URL.createObjectURL(f) };
+    const url = await new Promise((ok, erro) => {
+      const leitor = new FileReader();
+      leitor.onload = () => ok(leitor.result);
+      leitor.onerror = () => erro(leitor.error);
+      leitor.readAsDataURL(f);
+    });
+    return window.__ajusteGuardarImagem(nome, url);
+  }
+  // Onde o left/top de um elemento absoluto começa: no ancestral posicionado ou, sem nenhum, na página.
+  function baseDe(el) {
+    const op = el.offsetParent;
+    if (op && (op !== document.body || getComputedStyle(op).position !== 'static')) {
+      const r = op.getBoundingClientRect();
+      return { left: r.left + op.clientLeft, top: r.top + op.clientTop, nome: seletor(op) };
+    }
+    return { left: -scrollX, top: -scrollY, nome: 'a página' };
+  }
+  /* Camada com que um elemento disputa no ancestral comum: a do bloco mais de fora (abaixo do comum)
+     que forma uma camada própria; as camadas de dentro dele não passam para fora. */
+  function camadaEfetiva(el, comum) {
+    let z = camadaDe(el);
+    for (let n = el.parentElement; n && n !== comum; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      const formaCamada = (cs.position !== 'static' && cs.zIndex !== 'auto') || /fixed|sticky/.test(cs.position) ||
+        num(cs.opacity, 1) < 1 || cs.transform !== 'none' || cs.filter !== 'none' || cs.isolation === 'isolate';
+      if (formaCamada) z = camadaDe(n);
+    }
+    return z;
+  }
+  // Sobe a camada da imagem nova até nada do que se sobrepõe a ela ficar por cima.
+  function porCimaDeTudo(img) {
+    for (let i = 0; i < 20; i++) {
+      const outro = vizinhosDeCamada(img).acima;
+      if (!outro) return;
+      const z = camadaEfetiva(outro, img.parentElement) + 1;
+      if (z <= camadaDe(img)) return;
+      img.style.zIndex = String(z);
+    }
+  }
+  // origem: arquivo já lido (solto ou colado); sem ela, abre a janela de arquivos.
+  // ponto: onde o arquivo foi solto (a imagem fica centrada nele); sem ele, o meio da tela.
+  async function adicionarImagem(origem = null, ponto = null) {
+    let arquivo = origem;
+    if (!arquivo) {
+      if (window.__ajusteEscolherImagem) avisar('Abrindo a janela de arquivos do Windows…');
+      arquivo = await escolherArquivo().catch(() => null);
+      if (!arquivo) { avisar(''); return; }
+    }
     urlsNovas.set(arquivo.caminho, arquivo.url);
-    const referencia = selecionado && !grande(selecionado) && selecionado.isConnected ? selecionado : null;
+    const referencia = !ponto && selecionado && !grande(selecionado) && selecionado.isConnected ? selecionado : null;
     const pai = referencia?.parentElement ?? document.body;
     const largura = Math.round(referencia ? Math.min(referencia.offsetWidth || 240, 600) : 240);
     const cs = referencia ? getComputedStyle(referencia) : null;
-    // Coloca primeiro e mede a referência de posição (o ancestral posicionado), para centralizar na tela.
+    // Coloca primeiro e mede a referência de posição (o ancestral posicionado), para centralizar.
     const img = await criarImagem(pai, arquivo.url, arquivo.nome, largura, {
       zIndex: cs?.zIndex && cs.zIndex !== 'auto' ? cs.zIndex : '', opacity: cs ? cs.opacity : '1',
     });
-    const base = (img.offsetParent ?? document.documentElement).getBoundingClientRect();
-    const left = Math.round(innerWidth / 2 - base.left - largura / 2);
-    const top = Math.round(innerHeight / 2 - base.top - img.offsetHeight / 2);
+    const base = baseDe(img);
+    const left = Math.round((ponto?.x ?? innerWidth / 2) - base.left - largura / 2);
+    const top = Math.round((ponto?.y ?? innerHeight / 2) - base.top - img.offsetHeight / 2);
     Object.assign(img.style, { left: `${left}px`, top: `${top}px` });
+    if (!referencia) porCimaDeTudo(img);
     const s = estado(img);
     s.novo = {
       nome: arquivo.nome, caminho: arquivo.caminho, left, top, largura,
       zIndex: img.style.zIndex, opacidade: img.style.opacity,
       pai: seletor(pai), referencia: referencia ? descrever(referencia) : null, codigo: origemDe(referencia ?? pai),
-      base: img.offsetParent ? seletor(img.offsetParent) : 'a página',
+      base: base.nome,
     };
     selecionar(img);
     aplicar(img);
-    avisar(`Imagem adicionada: ${arquivo.nome}. Arraste, redimensione ou gire à vontade.`);
+    // Na camada da referência ela pode ficar atrás de algo: avisa, em vez de ficar sumida sem explicação.
+    const tampa = referencia ? vizinhosDeCamada(img).acima : null;
+    avisar(tampa
+      ? `Imagem adicionada na camada de ${rotulo(referencia).nome}, mas atrás de ${rotulo(tampa).nome}. Arraste para outro lugar ou use "Para frente".`
+      : `Imagem adicionada: ${arquivo.nome}. Arraste para mover; alças para o tamanho; bolinha de cima para girar.`);
+  }
+  async function adicionarArquivos(arquivos, ponto = null) {
+    const imagens = [...arquivos].filter((f) => f.type.startsWith('image/'));
+    if (!imagens.length) { avisar('Só dá para adicionar arquivos de imagem.'); return; }
+    avisar('Adicionando…');
+    for (const [i, f] of imagens.entries()) {
+      const arquivo = await lerArquivo(f).catch(() => null);
+      if (!arquivo) { avisar(`Não consegui ler ${f.name || 'a imagem'}.`); continue; }
+      // Várias de uma vez ficam em cascata, para dar para ver cada uma.
+      await adicionarImagem(arquivo, ponto ? { x: ponto.x + i * 24, y: ponto.y + i * 24 } : null);
+    }
   }
   function remover(els) {
     if (!els.length) return;
@@ -338,8 +407,19 @@
      no "vazio" de uma seção pega o que está embaixo, e não a seção inteira. */
   const grande = (el) => area(el) > innerWidth * innerHeight * 0.5;
   const dentro = (el, x, y) => { const r = el.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
+  /* Imagens novas têm pointer-events: none (como as gravuras, para não roubar cliques do site), mas no
+     editor precisam ser pegas pelo clique como qualquer coisa visível. */
+  function elementosSob(x, y) {
+    const novas = document.querySelectorAll('img[data-ajuste-novo]');
+    novas.forEach((n) => n.style.setProperty('pointer-events', 'auto'));
+    try {
+      return document.elementsFromPoint(x, y).filter((el) => el !== host && el !== document.documentElement && el !== document.body);
+    } finally {
+      novas.forEach((n) => n.style.setProperty('pointer-events', 'none'));
+    }
+  }
   function elementosNoPonto(x, y) {
-    const topo = document.elementsFromPoint(x, y).filter((el) => el !== host && el !== document.documentElement && el !== document.body);
+    const topo = elementosSob(x, y);
     const resto = [...document.body.querySelectorAll('*')].filter((el) => {
       if (el === host || topo.includes(el)) return false;
       const r = el.getBoundingClientRect();
@@ -450,7 +530,9 @@
     const antes = medir(el);
     guardarDesfazer(ramo);
     const s = estado(ramo);
-    const z = para === 'frente' ? camadaDe(ramoOutro) + 1 : camadaDe(ramoOutro) - 1;
+    // A camada que disputa é a do outro elemento vista de fora (ramoOutro pode não ter camada própria).
+    const zOutro = camadaEfetiva(outro, ramo.parentElement);
+    const z = para === 'frente' ? zOutro + 1 : zOutro - 1;
     s.estilos['z-index'] = String(z);
     // z-index só vale em elemento posicionado; relative não tira o elemento do lugar.
     if (getComputedStyle(ramo).position === 'static') s.estilos.position = 'relative';
@@ -507,6 +589,8 @@
         .alca[data-a="s"]  { left: 50%; top: 100%; cursor: ns-resize; }
         .alca[data-a="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
         .alca[data-a="w"]  { left: 0; top: 50%; cursor: ew-resize; }
+        .alca[data-a="rot"] { left: 50%; top: -26px; border-radius: 50%; background: #fff; border-color: #ff5a1f; cursor: grab; }
+        .alca[data-a="rot"]::after { content: ''; position: absolute; left: 50%; top: 100%; width: 2px; height: 18px; margin-left: -1px; background: #ff5a1f; }
         .painel { position: fixed; right: 12px; bottom: 12px; width: 300px; max-height: 80vh; display: flex; flex-direction: column; pointer-events: auto;
           background: #1d1d1f; color: #f2f2f2; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.35); padding: 8px 10px; }
         .corpo { overflow: auto; min-height: 0; }
@@ -527,8 +611,24 @@
         button { background: #3a3a3d; color: #fff; border: 0; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
         button:hover { background: #4a4a4e; }
         button.forte { background: #ff5a1f; }
+        button.forte:hover { background: #ff7440; }
+        button:disabled { opacity: .35; cursor: default; background: #3a3a3d; }
+        button.perigo { background: #b3261e; }
         .botoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-        .aviso { color: #8fe3a5; margin-top: 6px; min-height: 1em; word-break: break-all; }
+        .acoes-el { margin-top: 2px; gap: 4px; }
+        .acoes-el button { padding: 3px 8px; }
+        .vazio { white-space: normal; color: #c9c9cf; }
+        .vazio b { color: #f2f2f2; }
+        .pagina-acoes { border-top: 1px solid #333; padding-top: 8px; }
+        .rodape { border-top: 1px solid #333; margin-top: 6px; }
+        .painel.min .rodape { border: 0; margin: 0; }
+        .aviso { color: #8fe3a5; margin-top: 6px; min-height: 1em; word-break: break-word; }
+        .aviso:empty { display: none; }
+        /* Arquivo sendo arrastado sobre a página: moldura avisando que dá para soltar. */
+        .soltar { position: fixed; inset: 6px; display: none; align-items: center; justify-content: center; pointer-events: none;
+          border: 3px dashed #ff5a1f; border-radius: 12px; background: rgba(255,90,31,.08); }
+        .soltar span { background: #ff5a1f; color: #fff; font-weight: 600; padding: 8px 14px; border-radius: 999px; font-size: 14px; }
+        .soltar.on { display: flex; }
         h4 { margin: 8px 0 2px; font-weight: 600; color: #c9c9cf; }
         .telas { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 2px 0 4px; color: #a0a0a5; }
         .telas b { color: #f2f2f2; font-weight: 600; margin-right: 2px; }
@@ -565,18 +665,27 @@
     const pilula = '<button class="pilula" data-acao="alternar" title="Ctrl+Shift+E">✎ Ajuste visual</button>';
     const caixas = `
       <div class="caixa hover"></div>
-      <div class="caixa sel">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((a) => `<div class="alca" data-a="${a}"></div>`).join('')}</div>
+      <div class="caixa sel">${['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((a) => `<div class="alca" data-a="${a}" title="Puxe para mudar o tamanho"></div>`).join('')}<div class="alca" data-a="rot" title="Puxe para girar (Shift: de 15 em 15°)"></div></div>
       <div class="extras"></div>
       <div class="guia gx"></div><div class="guia gy"></div>
-      ${'<div class="medida"><span></span></div>'.repeat(4)}`;
+      ${'<div class="medida"><span></span></div>'.repeat(4)}
+      <div class="soltar"><span>Solte para adicionar a imagem aqui</span></div>`;
     const htmlPainel = `
       <div class="painel${moldura ? ' lado' : ''}">
         <div class="topo" title="Arraste para mover o painel"><span>⠿ Ajuste visual</span><button data-acao="ajuda" title="Atalhos">?</button><button data-acao="min" title="Recolher">–</button></div>
         <div class="corpo">
-          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · Para frente / Para trás (Ctrl+] / Ctrl+[): passa por cima ou por baixo do elemento que se sobrepõe · + Imagem: adiciona uma imagem de uma pasta na camada do elemento escolhido · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
+          <div class="dica">Clique num elemento e arraste. Alt+clique: pega o que está escondido atrás (repita para ir mais fundo). Alças laranja: tamanho (lados: só largura ou altura; cantos: os dois, Shift solta a proporção). Bolinha branca em cima: girar (Shift: de 15 em 15°). Ctrl+rodinha: tamanho · Shift+rodinha: girar · Alt+rodinha: opacidade · setas: 1px (Shift 10px) · [ e ]: elemento de trás/da frente · Shift+clique: escolhe vários (move, alinha e distribui juntos) · duplo clique: edita o texto · Ctrl ao arrastar: solta das guias · Ctrl+Z: desfazer · Delete: remover · H: espelhar · Para frente / Para trás (Ctrl+] / Ctrl+[): passa por cima ou por baixo do elemento que se sobrepõe · Imagem nova: botão + Imagem, arrastar o arquivo do Windows para a página ou Ctrl+V · Estilo: cor, fonte, espaçamento e camada · Nota: um pedido livre para o agente · Esc: soltar · Ctrl+Shift+E: desligar.</div>
           <div class="telas" title="Mudar a largura da tela. Cada largura guarda os seus próprios ajustes (ponto: tem ajustes guardados).">Tela <b class="agora"></b>
             ${tamanhosDeTela.map(([nome, w]) => `<button data-tela="${w}" title="${w}px">${nome}</button>`).join('')}<button data-tela="0" title="Volta ao tamanho da janela">Janela</button></div>
-          <div class="info sel-info">Nenhum elemento escolhido.</div>
+          <div class="info sel-info"></div>
+          <div class="botoes acoes-el" title="Valem para o elemento escolhido (ou a seleção inteira)">
+            <button data-acao="texto" title="Duplo clique no elemento faz o mesmo">Editar texto</button>
+            <button data-acao="espelhar" title="H">Espelhar</button>
+            <button data-acao="frente" title="Passa por cima do próximo elemento que se sobrepõe a ele (Ctrl+])">Para frente</button>
+            <button data-acao="tras" title="Passa por baixo do próximo elemento que se sobrepõe a ele (Ctrl+[)">Para trás</button>
+            <button data-acao="remover" title="Delete">Remover</button>
+            <button data-acao="restaurar" title="Desfaz todos os ajustes deste elemento">Restaurar este</button>
+          </div>
           <div class="alinhar" title="Alinha a seleção (Shift+clique escolhe vários)">
             <button data-alinhar="esquerda" title="Alinhar à esquerda">⇤</button><button data-alinhar="centro" title="Centralizar na horizontal">↔</button><button data-alinhar="direita" title="Alinhar à direita">⇥</button>
             <button data-alinhar="topo" title="Alinhar em cima">⤒</button><button data-alinhar="meio" title="Centralizar na vertical">↕</button><button data-alinhar="base" title="Alinhar embaixo">⤓</button>
@@ -588,20 +697,18 @@
           <ul class="lista candidatos"></ul>
           <h4>Alterados (<span class="total">0</span>)</h4>
           <ul class="lista alterados"></ul>
+          <div class="botoes pagina-acoes">
+            <button data-acao="guias" title="Guias de alinhamento ao arrastar (Ctrl solta) e medidas até o elemento sob o mouse">Guias: sim</button>
+            <button data-acao="anim">Parar animações</button>
+            <button data-acao="limpar" title="Apaga os ajustes de todas as larguras de tela (pede confirmação)">Limpar tudo</button>
+          </div>
+        </div>
+        <div class="rodape">
           <div class="botoes">
             <button class="forte" data-acao="copiar">Copiar alterações</button>
             <button class="com-node" data-acao="copiar-prints" title="Também salva prints da página inteira, antes e depois, na pasta prints">Copiar com prints</button>
-            <button data-acao="desfazer">Desfazer</button>
-            <button data-acao="imagem" title="Escolher uma imagem de uma pasta e colocar na página">+ Imagem</button>
-            <button data-acao="espelhar" title="H">Espelhar</button>
-            <button data-acao="frente" title="Passa por cima do próximo elemento que se sobrepõe a ele (Ctrl+])">Para frente</button>
-            <button data-acao="tras" title="Passa por baixo do próximo elemento que se sobrepõe a ele (Ctrl+[)">Para trás</button>
-            <button data-acao="texto" title="Duplo clique no elemento faz o mesmo">Editar texto</button>
-            <button data-acao="guias" title="Guias de alinhamento ao arrastar (Ctrl solta) e medidas até o elemento sob o mouse">Guias: sim</button>
-            <button data-acao="remover" title="Delete">Remover</button>
-            <button data-acao="restaurar">Restaurar este</button>
-            <button data-acao="limpar">Limpar tudo</button>
-            <button data-acao="anim">Parar animações</button>
+            <button data-acao="imagem" title="Escolher uma imagem de uma pasta (ou arraste o arquivo para a página, ou Ctrl+V)">+ Imagem</button>
+            <button data-acao="desfazer" title="Ctrl+Z">Desfazer</button>
           </div>
           <div class="aviso"></div>
         </div>
@@ -618,6 +725,7 @@
     caixaSel = raiz.querySelector('.sel');
     painel = raiz.querySelector('.painel');
 
+    let esperaLimpar = 0;
     raiz.addEventListener('click', (e) => {
       const acao = e.target.closest?.('[data-acao]')?.dataset.acao;
       if (acao === 'alternar') alternar();
@@ -635,7 +743,15 @@
       const alinhamento = e.target.closest?.('[data-alinhar]')?.dataset.alinhar;
       if (alinhamento) alinhar(alinhamento);
       if (acao === 'imagem') adicionarImagem();
-      if (acao === 'limpar') {
+      // Limpar tudo não tem desfazer: o primeiro clique só pede confirmação no próprio botão.
+      const botaoLimpar = acao === 'limpar' ? e.target.closest('button') : null;
+      const voltarLimpar = () => { clearTimeout(esperaLimpar); botaoLimpar.classList.remove('perigo'); botaoLimpar.textContent = 'Limpar tudo'; };
+      if (botaoLimpar && !botaoLimpar.classList.contains('perigo')) {
+        botaoLimpar.classList.add('perigo');
+        botaoLimpar.textContent = 'Clique de novo para limpar tudo';
+        esperaLimpar = setTimeout(voltarLimpar, 3000);
+      } else if (botaoLimpar) {
+        voltarLimpar();
         [...alteracoes.keys()].forEach(restaurar);
         parados = [];
         notaGeral = '';
@@ -721,7 +837,12 @@
     encaixarPainel();
     janelaUi.addEventListener('resize', encaixarPainel);
     // Com o foco no painel da moldura, as teclas chegam por ela.
-    if (moldura) janelaUi.addEventListener('keydown', teclado, true);
+    if (moldura) {
+      janelaUi.addEventListener('keydown', teclado, true);
+      janelaUi.addEventListener('paste', colar, true);
+      // Arquivo solto fora do quadro: não deixa o Chrome trocar a moldura pelo arquivo.
+      for (const tipo of ['dragover', 'drop']) janelaUi.addEventListener(tipo, (e) => { if (temArquivos(e)) e.preventDefault(); }, true);
+    }
     if (avisoPendente) avisar(avisoPendente);
     atualizarPilula();
     atualizarTelas();
@@ -876,7 +997,15 @@
         (s && mudou(s) && !s.removido ? ` · moveu ${s.dx}, ${s.dy}px` + (s.rot ? ` · girou ${s.rot}°` : '') + (s.opacidade != null ? ` · opac. ${s.opacidade}` : '') : '') + '</small>' +
         (codigo ? `<small>${html(codigo.split(/[\\/]/).slice(-2).join('/'))}</small>` : '');
       if (sel.length > 1) info.innerHTML += `<small>+ ${sel.length - 1} na seleção (Shift+clique põe ou tira)</small>`;
-    } else info.textContent = 'Nenhum elemento escolhido.';
+    } else {
+      info.innerHTML = '<div class="vazio"><b>Clique em algo na página</b> para escolher e arraste para mover. ' +
+        'Para pôr uma imagem: <b>+ Imagem</b>, arraste o arquivo do Windows para a página ou cole com <b>Ctrl+V</b>.</div>';
+      info.title = '';
+    }
+    // Botões do elemento só valem com algo escolhido; "Restaurar" só se ele mudou; "Desfazer" só se há o que desfazer.
+    raiz.querySelectorAll('.acoes-el button').forEach((b) => { b.disabled = !selecionado; });
+    raiz.querySelector('[data-acao="restaurar"]').disabled = !sel.some((el) => alteracoes.has(el) && mudou(alteracoes.get(el)));
+    raiz.querySelector('[data-acao="desfazer"]').disabled = !desfazer.length;
     // Mostra só o que de fato mudou (escolher um elemento sem mexer não conta). A seleção e o texto
     // em edição ficam, mesmo sem mudança ainda (senão o meio de uma ação em grupo perderia elementos).
     if (!arrasto) for (const [el, s] of alteracoes) if (!mudou(s) && el !== editando && !sel.includes(el)) restaurar(el);
@@ -932,7 +1061,10 @@
     guardarDesfazer(grupo);
     const s = estado(el);
     const r = el.getBoundingClientRect();
+    // Girar pela bolinha: o ângulo do ponteiro em volta do centro do elemento.
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     arrasto = { el, modo, x: e.clientX, y: e.clientY, dx: s.dx, dy: s.dy, r0: r,
+      cx, cy, rot: s.rot, angulo: Math.atan2(e.clientY - cy, e.clientX - cx) * 180 / Math.PI,
       grupo: grupo.map((g) => ({ el: g, dx: estado(g).dx, dy: estado(g).dy })),
       linhas: modo === 'mover' && guiasLigadas ? linhasDeAlinhamento(grupo) : null,
       largura: s.largura ?? s.orig.larguraCss, altura: s.altura ?? (el.offsetHeight || r.height), proporcao: r.height / r.width };
@@ -962,6 +1094,15 @@
         }
         return;
       }
+      if (a === 'rot') {
+        const angulo = Math.atan2(e.clientY - arrasto.cy, e.clientX - arrasto.cx) * 180 / Math.PI;
+        // Com Shift, a rotação na tela vai de 15 em 15°.
+        let total = s.orig.rotate + arrasto.rot + angulo - arrasto.angulo;
+        total = e.shiftKey ? Math.round(total / 15) * 15 : Math.round(total);
+        s.rot = ((total - s.orig.rotate) % 360 + 540) % 360 - 180;
+        aplicar(arrasto.el);
+        return;
+      }
       // Lado puxado cresce; o lado oposto fica parado (compensa com o deslocamento).
       const horizontal = a.includes('e') ? mx : a.includes('w') ? -mx : 0;
       const vertical = a.includes('s') ? my : a.includes('n') ? -my : 0;
@@ -980,11 +1121,13 @@
       return;
     }
     if (dentroDaUi(e)) { ultimoHover = null; return; }
-    const sob = document.elementsFromPoint(e.clientX, e.clientY).filter((el) => el !== host && el !== document.documentElement && el !== document.body);
-    ultimoHover = sob.find((el) => !grande(el)) ?? null;
+    ultimoHover = elementosSob(e.clientX, e.clientY).find((el) => !grande(el)) ?? null;
   }, true);
   window.addEventListener('pointerup', () => {
     if (!arrasto) return;
+    // Clique sem mexer (só escolher o elemento) não deixa um passo vazio no desfazer.
+    const passo = desfazer[desfazer.length - 1];
+    if (passo?.every(({ el, antes }) => JSON.stringify(antes) === JSON.stringify(copia(estado(el))))) desfazer.pop();
     arrasto = null;
     atualizarPainel();
   }, true);
@@ -1052,6 +1195,40 @@
     }
   }, { capture: true, passive: false });
 
+  /* Campo de texto (da página ou do painel). Sem instanceof: na moldura o painel está em outra janela,
+     com outro HTMLElement, e as teclas digitadas na nota virariam atalhos (H espelhava, Delete removia). */
+  const emCampo = (n) => n?.nodeType === 1 && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName));
+
+  /* Soltar arquivos de imagem na página (do Explorador do Windows) ou colar uma com Ctrl+V. Sem isto o
+     Chrome abriria o arquivo no lugar da página. Na moldura, soltar fora do quadro só não faz nada. */
+  const temArquivos = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+  // O aviso "Solte aqui" some pouco depois do último dragover (o dragleave dispara a cada filho).
+  let esperaSoltar = 0;
+  const mostrarSoltar = (sim) => raiz?.querySelector('.soltar')?.classList.toggle('on', sim);
+  window.addEventListener('dragover', (e) => {
+    if (!ligado || !temArquivos(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    mostrarSoltar(true);
+    clearTimeout(esperaSoltar);
+    esperaSoltar = setTimeout(() => mostrarSoltar(false), 200);
+  }, true);
+  window.addEventListener('drop', (e) => {
+    if (!ligado || !temArquivos(e)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    mostrarSoltar(false);
+    adicionarArquivos(e.dataTransfer.files, { x: e.clientX, y: e.clientY });
+  }, true);
+  function colar(e) {
+    if (!ligado || emCampo(e.composedPath()[0])) return;
+    const arquivos = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!arquivos.length) return;
+    e.preventDefault();
+    adicionarArquivos(arquivos);
+  }
+  window.addEventListener('paste', colar, true);
+
   function voltar() {
     const passo = desfazer.pop();
     if (!passo) return;
@@ -1072,8 +1249,8 @@
     if (editando && (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey))) { e.preventDefault(); editando.blur(); return; }
     const alvo = e.composedPath()[0];
     // Num campo do painel, Esc só sai do campo (o próximo Esc solta o elemento).
-    if (e.key === 'Escape' && alvo instanceof HTMLElement && /INPUT|TEXTAREA/.test(alvo.tagName) && raiz?.contains(alvo)) { alvo.blur(); return; }
-    if (alvo instanceof HTMLElement && (alvo.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(alvo.tagName))) return;
+    if (e.key === 'Escape' && emCampo(alvo) && raiz?.contains(alvo)) { alvo.blur(); return; }
+    if (emCampo(alvo)) return;
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); voltar(); return; }
     if (e.key === 'Escape') { selecionar(null); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && selecionado) { e.preventDefault(); remover(selecao()); return; }
@@ -1406,12 +1583,14 @@
           s.rot ? `rotação ${s.rot}°` : '',
           s.opacidade != null ? `opacidade ${s.opacidade}` : o.opacidade !== 1 ? `opacidade ${o.opacidade}` : '',
           s.espelhado ? 'espelhada na horizontal' : '',
+          n.zIndex && s.estilos?.['z-index'] == null ? `camada (z-index) ${n.zIndex}` : '',
+          ...Object.entries(s.estilos ?? {}).map(([p, valor]) => `${p}: ${valor}`),
         ].filter(Boolean);
         linhas.push(
           `${i + 1}. ADICIONAR imagem nova  [${n.nome}]`,
           ...atencao,
           `   arquivo: ${n.caminho}`,
-          `   colocar dentro de: ${n.pai}` + (n.referencia ? ` (mesma camada de ${n.referencia})` : ''),
+          `   colocar dentro de: ${n.pai}` + (n.referencia ? ` (mesma camada de ${n.referencia})` : ' (solta na página, por cima do conteúdo)'),
           ...(n.codigo ? [`   código do elemento de referência: ${n.codigo}`] : []),
           `   posição absoluta em relação a ${n.base}: left ${n.left + s.dx}px, top ${n.top + s.dy}px`,
           `   largura: ${largura}px` + (s.altura != null ? ` · altura ${s.altura}px` : ' · altura automática') + (extras.length ? ` · ${extras.join(' · ')}` : ''),

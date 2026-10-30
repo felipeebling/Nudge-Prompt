@@ -60,6 +60,8 @@ async function relatorio() {
   return readFileSync(join(saida, 'alteracoes.txt'), 'utf8');
 }
 const ligar = () => pagina.keyboard.press('Control+Shift+E');
+// "Limpar tudo" pede confirmação: o segundo clique é o que limpa.
+const limpar = async () => { await botao('limpar').click(); await botao('limpar').click(); };
 
 /* ---------- 1. arquivo e linha do código ---------- */
 await pagina.goto(endereco);
@@ -112,7 +114,7 @@ conferir('avisa que já está no código', (await aviso()).includes('1 já no c�
 trocas = [];
 await recarregar();
 await ligar();
-await botao('limpar').click();
+await limpar();
 await recarregar();
 conferir('"Limpar tudo" também apaga o que estava guardado', !(await aviso()), await aviso());
 
@@ -135,6 +137,11 @@ conferir('na outra largura, o ajuste de 1280px não aparece', (await alvo.evalua
 await arrastar(await centro('.card h2'), 0, 30);
 // ~30px para baixo (as guias podem grudar alguns px adiante).
 conferir('arrastar dentro do quadro funciona', /moveu 0, 3\dpx/.test(await pagina.locator('[data-ajuste-visual] .sel-info').innerText()), await pagina.locator('[data-ajuste-visual] .sel-info').innerText());
+// Escrever na nota do painel (na moldura, outra janela) não pode virar atalho: H espelharia o título.
+await pagina.locator('[data-ajuste-visual] .nota').click();
+await pagina.keyboard.type('h');
+conferir('na moldura, digitar na nota não aciona atalhos', (await alvo.evaluate(() => document.querySelector('.card h2').style.scale)) !== '-1 1');
+await pagina.locator('[data-ajuste-visual] .nota').fill('');
 texto = await relatorio();
 conferir('o texto separa os ajustes por largura', texto.includes('=== Tela de 1280px de largura ===') && texto.includes('=== Tela de 390px de largura (a atual) ==='), texto);
 await telaBotao(768).click();
@@ -159,7 +166,7 @@ conferir('a interface volta depois dos prints', await pagina.locator('[data-ajus
 console.log(`     prints em ${join(saida, 'prints')}`);
 
 /* ---------- 6. texto e estilo ---------- */
-await botao('limpar').click();
+await limpar();
 const h2 = await centro('.card h2');
 await pagina.mouse.dblclick(h2.x, h2.y);
 await pagina.keyboard.type('Bem-vindo a São Pedro');
@@ -198,7 +205,7 @@ const [ta, tb] = [await caixa('.arte-a'), await caixa('.botao')];
 conferir('alinhar em cima iguala o topo', Math.abs(ta.y - tb.y) < 1, JSON.stringify([ta, tb]));
 
 /* ---------- 8. guias e medidas ---------- */
-await botao('limpar').click();
+await limpar();
 await pagina.keyboard.press('Escape');
 // Arrasta a .arte-a até quase encostar na borda esquerda do card: deve grudar nela.
 const card = await caixa('.card');
@@ -224,7 +231,7 @@ conferir('a nota geral volta depois de recarregar', (await pagina.locator('[data
 
 /* ---------- elemento que sai da página ---------- */
 // O site troca um pedaço da página (recarga parcial, componente que renderiza de novo) depois do ajuste.
-await botao('limpar').click();
+await limpar();
 await pagina.keyboard.press('Escape');
 await arrastar(await centro('.botao'), 20, 0);
 await pagina.evaluate(() => { const b = document.querySelector('.botao'); b.replaceWith(b.cloneNode(true)); });
@@ -232,7 +239,7 @@ texto = await relatorio();
 conferir('copiar funciona com um elemento ajustado que saiu da página', texto.includes('mover: 20px para a direita'), await aviso());
 
 /* ---------- camadas: para frente / para trás ---------- */
-await botao('limpar').click();
+await limpar();
 await pagina.keyboard.press('Escape');
 await pagina.mouse.click(580, 545);
 const zFundo = () => pagina.locator('.fundo-artes').evaluate((el) => getComputedStyle(el).zIndex);
@@ -245,6 +252,83 @@ await botao('frente').click();
 conferir('na frente de tudo, avisa e não muda', (await aviso()).includes('Já está na frente') && (await zFundo()) === '2', await aviso());
 await pagina.keyboard.press('Control+BracketLeft');
 conferir('Ctrl+[ manda para trás', (await zFundo()) === '0', await zFundo());
+
+/* ---------- imagem nova ---------- */
+// Um PNG de 1px; a página o mostra com a largura que o editor der.
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
+// A imagem nova está visível no ponto (nada por cima dela)?
+const visivelNoPonto = (seletor) => pagina.evaluate((s) => {
+  const img = document.querySelector(s);
+  const r = img.getBoundingClientRect();
+  img.style.pointerEvents = 'auto';
+  const topo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  img.style.pointerEvents = 'none';
+  return topo === img;
+}, seletor);
+await limpar();
+await pagina.keyboard.press('Escape');
+// Rola até a faixa (camada 1) ficar no meio da tela: sem nada escolhido, a imagem tem de aparecer por cima dela.
+await pagina.evaluate(() => scrollTo(0, 350));
+// A janela de arquivos do Windows não abre no teste: a escolha é simulada.
+await pagina.evaluate((url) => { window.__ajusteEscolherImagem = async () => ({ caminho: 'C:/fotos/praca.png', nome: 'praca.png', url }); },
+  `data:image/png;base64,${png.toString('base64')}`);
+await botao('imagem').click();
+await pagina.waitForTimeout(400);
+conferir('"+ Imagem" sem nada escolhido aparece por cima de tudo', await visivelNoPonto('img[data-ajuste-novo="praca.png"]'));
+await pagina.keyboard.press('Escape');
+const praca = await caixa('img[data-ajuste-novo="praca.png"]');
+await arrastar({ x: praca.x + praca.width / 2, y: praca.y + praca.height / 2 }, 0, -100);
+const pracaDepois = await caixa('img[data-ajuste-novo="praca.png"]');
+// ~100px para cima (as guias podem grudar alguns px adiante).
+conferir('clicar na imagem nova pega ela e arrasta', Math.abs(praca.y - pracaDepois.y - 100) <= 5, JSON.stringify([praca, pracaDepois]));
+texto = await relatorio();
+conferir('o texto diz a camada da imagem nova', /ADICIONAR imagem nova {2}\[praca\.png\][\s\S]*camada \(z-index\) 2/.test(texto), texto);
+// Soltar um arquivo na página, como do Explorador do Windows.
+await pagina.evaluate((b64) => {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const dados = new DataTransfer();
+  dados.items.add(new File([bytes], 'solta.png', { type: 'image/png' }));
+  const ev = { bubbles: true, cancelable: true, clientX: 300, clientY: 300, dataTransfer: dados };
+  document.elementFromPoint(300, 300).dispatchEvent(new DragEvent('dragover', ev));
+  document.elementFromPoint(300, 300).dispatchEvent(new DragEvent('drop', ev));
+}, png.toString('base64'));
+await pagina.waitForTimeout(600);
+const solta = await alvo.locator('img[data-ajuste-novo^="solta"]').count() ? await caixa('img[data-ajuste-novo^="solta"]') : null;
+conferir('soltar um arquivo na página adiciona a imagem onde soltou', !!solta && Math.abs(solta.x + solta.width / 2 - 300) < 2 && Math.abs(solta.y + solta.height / 2 - 300) < 2, JSON.stringify(solta));
+texto = await relatorio();
+conferir('a imagem solta é guardada numa pasta e o texto traz o caminho', texto.includes(`arquivo: ${join(saida, 'imagens', 'solta.png')}`) && existsSync(join(saida, 'imagens', 'solta.png')), texto);
+// Colar (Ctrl+V) uma imagem da área de transferência.
+await pagina.evaluate((b64) => {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const dados = new DataTransfer();
+  dados.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+  document.body.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dados }));
+}, png.toString('base64'));
+await pagina.waitForTimeout(600);
+conferir('Ctrl+V cola uma imagem com nome próprio', (await alvo.locator('img[data-ajuste-novo^="colada-"]').count()) === 1);
+
+/* ---------- girar pela alça ---------- */
+await pagina.keyboard.press('Escape');
+await pagina.evaluate(() => scrollTo(0, 0));
+await pagina.mouse.click((await centro('.botao')).x, (await centro('.botao')).y);
+await pagina.waitForTimeout(100);
+const giro =await pagina.locator('[data-ajuste-visual] .alca[data-a="rot"]').boundingBox();
+const meio = await centro('.botao');
+// Da bolinha (em cima do centro) até a direita do centro: um quarto de volta no sentido horário.
+await pagina.mouse.move(giro.x + giro.width / 2, giro.y + giro.height / 2);
+await pagina.mouse.down();
+await pagina.mouse.move(meio.x + 40, meio.y - 20, { steps: 3 });
+await pagina.mouse.move(meio.x + 80, meio.y, { steps: 3 });
+await pagina.mouse.up();
+conferir('a bolinha de cima gira o elemento', (await pagina.locator('[data-ajuste-visual] .sel-info').innerText()).includes('girou 90°'), await pagina.locator('[data-ajuste-visual] .sel-info').innerText());
+
+/* ---------- painel ---------- */
+await pagina.keyboard.press('Escape');
+conferir('sem nada escolhido, os botões do elemento ficam apagados', await botao('remover').isDisabled());
+await botao('limpar').click();
+conferir('"Limpar tudo" pede confirmação antes', (await alvo.locator('img[data-ajuste-novo]').count()) === 3);
+await botao('limpar').click();
+conferir('o segundo clique limpa', (await alvo.locator('img[data-ajuste-novo]').count()) === 0);
 
 
 console.log(`\n${total - falhas.length}/${total} conferências passaram.`);

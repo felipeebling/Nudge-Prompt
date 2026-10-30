@@ -31,6 +31,8 @@ USAR (na janela que abrir)
                          largura ou só a altura; as dos cantos mudam as duas
                          (em imagens mantêm a proporção; com Shift, livre).
                          O lado oposto ao que você puxa fica parado.
+  Bolinha branca ....... (em cima do elemento escolhido) puxe em volta para girar;
+                         com Shift, vai de 15 em 15°.
   Ctrl+rodinha ......... tamanho
   Shift+rodinha ........ girar
   Alt+rodinha .......... opacidade
@@ -45,12 +47,21 @@ USAR (na janela que abrir)
   Nota ................. (no painel) um pedido livre para o agente, como "trocar esta
                          foto". Com um elemento escolhido, a nota é dele; sem nada
                          escolhido, é uma nota geral da página.
-  + Imagem ............. abre a janela de arquivos do Windows; a imagem escolhida entra
-                         na mesma camada do elemento selecionado (escolha antes uma
-                         gravura, com Alt+clique, para ela ir junto das gravuras), no
-                         meio da tela, e já pode ser arrastada, redimensionada e girada.
+  Imagem nova .......... três jeitos:
+                         - arrastar o arquivo do Windows e soltar na página: entra onde
+                           você soltou, por cima de tudo;
+                         - Ctrl+V com uma imagem copiada (um print, por exemplo);
+                         - botão "+ Imagem", que abre a janela de arquivos do Windows.
+                         Sem nada escolhido, a imagem entra no meio da tela, por cima de
+                         tudo. Com um elemento escolhido, o botão e o Ctrl+V põem a imagem
+                         na mesma camada dele (escolha antes uma gravura, com Alt+clique,
+                         para ela ir junto das gravuras); se ali ela ficar atrás de algo,
+                         o painel avisa. Depois é só clicar nela para arrastar,
+                         redimensionar e girar como qualquer elemento.
+                         Imagens soltas ou coladas ganham uma cópia na pasta "imagens"
+                         (o navegador não diz de onde o arquivo veio).
                          No texto sai como "ADICIONAR imagem nova", com o caminho do
-                         arquivo, onde colocar, posição e tamanho finais.
+                         arquivo, onde colocar, camada, posição e tamanho finais.
   Para frente / trás ... (botões do painel, ou Ctrl+] e Ctrl+[) passa o elemento por
                          cima ou por baixo do próximo elemento que se sobrepõe a ele.
                          Se ele estiver dentro de um bloco que fica inteiro atrás do outro
@@ -63,7 +74,9 @@ USAR (na janela que abrir)
   Ctrl+Z ............... desfaz (inclusive remoção; "Restaurar este" também traz de volta)
   Esc .................. solta o elemento (num campo do painel, o primeiro Esc sai do campo)
   Painel ............... arraste pelo título para mudar de lugar; "?" mostra os
-                         atalhos e "–" recolhe. Lista "Elementos neste ponto"
+                         atalhos e "–" recolhe (Copiar, + Imagem e Desfazer continuam
+                         à vista embaixo). Os botões do elemento ficam logo abaixo do
+                         nome dele e só acendem com algo escolhido. Lista "Elementos neste ponto"
                          (clique para escolher; nome completo ao passar o mouse)
                          e "Alterados"; botão "Parar animações" ajuda a
                          posicionar peças que se mexem
@@ -103,13 +116,14 @@ RECARREGAR
   - já está como ficou depois do ajuste .............. o código já tem a mudança, não reaplica;
   - está diferente dos dois, ou não foi achado ....... não mexe, avisa no painel e mantém
                                                        o pedido no texto, com um "atenção".
-  "Limpar tudo" apaga as alterações de todas as larguras e a nota geral.
+  "Limpar tudo" apaga as alterações de todas as larguras e a nota geral. Como não dá
+  para desfazer, o primeiro clique só pede confirmação: clique de novo para limpar.
 
 OBSERVAÇÕES
   - Os valores valem para a largura de tela em que você ajustou (aparece no texto).
   - Esta janela usa um perfil próprio (pasta "perfil"), separado do seu Chrome.
   - Imagens novas são relidas do arquivo ao recarregar; só as escolhidas pela janela
-    de arquivos podem ser lidas (a lista fica em config.json).
+    de arquivos, soltas na página ou coladas podem ser lidas (a lista fica em config.json).
 
 PARA QUEM MEXE NO CÓDIGO
   editor.js ....... o editor, injetado em todas as páginas

@@ -27,7 +27,7 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
   });
 
   // "+ Imagem": abre a janela de arquivos do Windows e devolve o caminho e a imagem para a página.
-  const config = join(pasta, 'config.json');
+  const config = join(saida, 'config.json');
   const lerConfig = () => { try { return JSON.parse(readFileSync(config, 'utf8')); } catch { return {}; } };
   // Uma janela de arquivos por vez: cliques repetidos enquanto ela está aberta não abrem outras.
   let janelaAberta = null;
@@ -59,6 +59,24 @@ export async function prepararContexto(contexto, pasta, { saida = pasta, copiarP
     const escolhidas = [...new Set([caminho, ...(lerConfig().imagensEscolhidas ?? [])])].slice(0, 200);
     writeFileSync(config, JSON.stringify({ ...lerConfig(), ultimaPasta: dirname(caminho), imagensEscolhidas: escolhidas }, null, 2));
     return { caminho, nome: caminho.split(/[\\/]/).pop(), url: comoDataUrl(caminho) };
+  });
+  /* Imagem solta na página (arrastada do Windows) ou colada com Ctrl+V: o navegador não diz de onde
+     ela veio, então uma cópia fica na pasta "imagens" e esse caminho vai no texto para o agente.
+     Qualquer site aberto aqui pode chamar esta função: só aceita imagem, com nome limpo, até 40 MB,
+     e só grava nessa pasta. */
+  await contexto.exposeBinding('__ajusteGuardarImagem', async (_origem, nome, dataUrl) => {
+    const m = /^data:image\/(webp|png|jpe?g|gif|svg\+xml|avif);base64,(.+)$/.exec(String(dataUrl));
+    if (!m || m[2].length > 40 * 1024 * 1024 * 4 / 3) return null;
+    const ext = m[1] === 'svg+xml' ? 'svg' : m[1] === 'jpeg' ? 'jpg' : m[1];
+    const base = String(nome).replace(/\.[^.]*$/, '').replace(/[^\w\-. ]+/g, '-').replace(/^[-. ]+|[-. ]+$/g, '').slice(0, 80) || 'imagem';
+    const pastaImagens = join(saida, 'imagens');
+    mkdirSync(pastaImagens, { recursive: true });
+    let caminho = join(pastaImagens, `${base}.${ext}`);
+    for (let i = 2; existsSync(caminho); i++) caminho = join(pastaImagens, `${base}-${i}.${ext}`);
+    writeFileSync(caminho, Buffer.from(m[2], 'base64'));
+    const escolhidas = [...new Set([caminho, ...(lerConfig().imagensEscolhidas ?? [])])].slice(0, 200);
+    writeFileSync(config, JSON.stringify({ ...lerConfig(), imagensEscolhidas: escolhidas }, null, 2));
+    return { caminho, nome: caminho.split(/[\\/]/).pop(), url: dataUrl };
   });
   // Reler uma imagem nova ao recarregar a página. Só entrega arquivos escolhidos antes na janela de
   // arquivos: qualquer site aberto nesta janela pode chamar esta função, e ela não pode virar leitor de disco.
