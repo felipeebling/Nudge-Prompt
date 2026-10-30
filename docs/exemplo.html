@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Café da Serra</title>
+<style>
+  body { margin: 0; font-family: Georgia, 'Times New Roman', serif; background: #f6f0e6; color: #2f2118; }
+  a { color: inherit; text-decoration: none; }
+  .pagina { max-width: 1200px; margin: 0 auto; }
+  .topo { display: flex; align-items: center; justify-content: space-between; padding: 28px 64px; font-family: system-ui, sans-serif; }
+  .marca { font: 700 22px Georgia, serif; }
+  .menu { display: flex; gap: 32px; font-size: 15px; color: #6b5444; }
+  .heroi { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; padding: 40px 64px 80px; }
+  .heroi h1 { margin: 0 0 20px; font-size: 64px; line-height: 1.05; font-weight: 400; }
+  .heroi p { max-width: 440px; margin: 0 0 32px; font: 18px/1.6 system-ui, sans-serif; color: #6b5444; }
+  .botao { display: inline-block; padding: 14px 28px; border-radius: 999px; background: #2f2118; color: #f6f0e6; font: 600 15px system-ui, sans-serif; }
+  .foto { position: relative; height: 420px; border-radius: 24px; overflow: hidden;
+    background: radial-gradient(circle at 70% 30%, #e8b77a 0 18%, transparent 19%), linear-gradient(160deg, #a8603a, #5a2e1a); }
+  .foto svg { position: absolute; left: 50%; bottom: 40px; width: 220px; translate: -50% 0; }
+  .selo { position: absolute; left: calc(50% - 40px); top: 300px; width: 120px; height: 120px; border-radius: 50%; background: #e8b77a;
+    display: grid; place-items: center; text-align: center; font: 700 13px/1.3 system-ui, sans-serif; color: #2f2118; rotate: -12deg; }
+  .cartoes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 0 64px 80px; }
+  .cartao { padding: 28px; border-radius: 16px; background: #fff; }
+  .cartao h3 { margin: 0 0 8px; font-size: 22px; font-weight: 400; }
+  .cartao p { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #6b5444; }
+  @media (max-width: 700px) {
+    .topo { padding: 20px; } .menu { display: none; }
+    .heroi { grid-template-columns: 1fr; padding: 20px; } .heroi h1 { font-size: 44px; }
+    .foto { height: 300px; } .selo { left: auto; top: auto; right: 36px; bottom: 0; width: 96px; height: 96px; font-size: 11px; }
+    .cartoes { grid-template-columns: 1fr; padding: 0 20px 40px; }
+  }
+</style>
+</head>
+<body>
+<div class="pagina">
+<header class="topo">
+  <a class="marca" href="#">Café da Serra</a>
+  <nav class="menu"><a href="#">Cardápio</a><a href="#">Nossa história</a><a href="#">Onde estamos</a></nav>
+</header>
+<section class="heroi">
+  <div>
+    <h1>Café torrado na hora, do jeito da serra</h1>
+    <p>Grãos de pequenos produtores, torra artesanal toda manhã e um cantinho para sentar sem pressa.</p>
+    <a class="botao" href="#">Ver o cardápio</a>
+  </div>
+  <div class="foto">
+    <svg viewBox="0 0 100 80"><path d="M10 20h65v25a30 30 0 0 1-30 30h-5a30 30 0 0 1-30-30z" fill="#f6f0e6"/><path d="M75 28h6a10 10 0 0 1 0 20h-6" fill="none" stroke="#f6f0e6" stroke-width="6"/></svg>
+  </div>
+  <div class="selo">Desde<br>1998</div>
+</section>
+<section class="cartoes">
+  <div class="cartao"><h3>Espresso</h3><p>Encorpado, com notas de chocolate e caramelo.</p></div>
+  <div class="cartao"><h3>Coado</h3><p>Filtrado na hora, para sentir cada grão.</p></div>
+  <div class="cartao"><h3>Pão de queijo</h3><p>Assado a cada meia hora, com queijo da canastra.</p></div>
+</section>
+</div>
+</body>
+</html>
